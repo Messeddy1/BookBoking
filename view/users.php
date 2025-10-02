@@ -19,7 +19,7 @@ if (!$currentUser) {
 }
 
 $role = $currentUser['role'];
-if ($role !== 'superadmin' && $role !== 'gestionnaire') {
+if ($role !== 'superadmin') {
     header('Location: /');
     exit;
 }
@@ -117,15 +117,9 @@ if (isset($_GET['action'])) {
 </head>
 
 <body>
-
-    <div class="container-fluid mt-4">
+    <?php include("./includes/navbarDashboard.php"); ?>
+    <div class="container mt-4">
         <h2 class="mb-4">إدارة المستخدمين</h2>
-        <nav aria-label="breadcrumb" class="mb-4">
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="/dashboard"><i class="fas fa-home"></i> الرئيسية</a></li>
-                <li class="breadcrumb-item active" aria-current="page"><i class="fas fa-layer-group"></i> إدارة المستخدمين</li>
-            </ol>
-        </nav>
         <div class="card shadow-sm border-0">
             <div class="card-header bg-light d-flex flex-wrap justify-content-between align-items-center">
                 <h5 class="mb-3">قائمة المستخدمين</h5>

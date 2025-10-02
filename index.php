@@ -11,11 +11,11 @@ $path = rtrim($path, '/');
 switch ($path) {
     case '/':
     case '':
-        include 'view/books.php';
+        include 'view/home.php';
         break;
 
     case '/dashboard':
-        include 'view/home.php';
+        include 'view/dashboard.php';
         break;
 
     case '/login':

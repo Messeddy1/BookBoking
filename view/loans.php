@@ -16,7 +16,11 @@ if (!$currentUser) {
     header('Location: /login');
     exit;
 }
-
+$role = $currentUser["role"];
+if ($role !== 'superadmin' && $role !== 'gestionnaire') {
+    header('Location: /');
+    exit;
+}
 if (isset($_GET['action'])) {
     header('Content-Type: application/json');
     $action = $_GET['action'];
@@ -106,15 +110,10 @@ if (isset($_GET['action'])) {
 </head>
 
 <body>
+
+    <?php include("./includes/navbarDashboard.php"); ?>
     <div class="container mt-4">
         <h2 class="mb-4">إدارة الإعارات</h2>
-        <nav aria-label="breadcrumb" class="mb-4">
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="/dashboard"><i class="fas fa-home"></i> الرئيسية</a></li>
-                <li class="breadcrumb-item active" aria-current="page"><i class="fas fa-layer-group"></i> إدارة الإعارات</li>
-            </ol>
-        </nav>
-
         <!-- Search Filters -->
         <div class="mb-3 d-flex gap-3 flex-wrap">
             <input type="text" class="form-control" id="searchBook" placeholder="بحث بعنوان الكتاب أو المستخدم">
@@ -170,9 +169,9 @@ if (isset($_GET['action'])) {
                             <label for="status" class="form-label">الحالة</label>
                             <select class="form-select" id="status" name="status" required>
                                 <option value="" disabled selected>اختر الحالة</option>
-                                <option value="pending">مؤجلة</option>
-                                <option value="confiremed">معار</option>
-                                <option value="returned">مُرجعة</option>
+                                <option value="pending">قيد الانتظار</option>
+                                <option value="confiremed">مؤكد</option>
+                                <option value="returned">تم إرجاعه</option>
                             </select>
                         </div>
                     </div>
@@ -209,9 +208,9 @@ if (isset($_GET['action'])) {
                 loansTableBody.innerHTML = '';
                 list.forEach(l => {
 
-                    const statusText = l.status === 'pending' ? 'مؤجلة' :
-                        l.status === 'confiremed' ? 'معار' :
-                        l.status === 'returned' ? 'مُرجعة' : 'غير محددة';
+                    const statusText = l.status === 'pending' ? 'قيد الانتظار' :
+                        l.status === 'confiremed' ? 'مؤكد' :
+                        l.status === 'returned' ? 'تم إرجاعه' : 'غير محددة ';
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                 <td>${l.id}</td>

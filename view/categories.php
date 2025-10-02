@@ -1,8 +1,8 @@
 <?php
 session_start();
-require_once('./db_config.php'); // تأكد من مسار قاعدة البيانات
+require_once('./db_config.php'); 
 
-// التأكد من تسجيل الدخول
+
 if (!isset($_SESSION['user_id'])) {
     header('Location: /login');
     exit;
@@ -19,7 +19,7 @@ if (!$user) {
 }
 
 $role = $user['role'];
-if ($role !== 'superadmin' && $role !== 'gestionnaire') {
+if ($role !== 'superadmin') {
     header('Location: /');
     exit;
 }
@@ -144,17 +144,11 @@ $categories = $db->query("SELECT * FROM categories")->fetchAll(PDO::FETCH_ASSOC)
 </head>
 
 <body>
-    <div class="my-4">
-        <h2 class="mb-4">إدارة الأصناف والأنواع</h2>
-        <div class="container-fluid mt-4">
+    <div class="">
+        <?php include("./includes/navbarDashboard.php"); ?>
 
-            <!-- Breadcrumb / Go Back Links -->
-            <nav aria-label="breadcrumb" class="mb-4">
-                <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="/dashboard"><i class="fas fa-home"></i> الرئيسية</a></li>
-                    <li class="breadcrumb-item active" aria-current="page"><i class="fas fa-layer-group"></i> إدارة الأصناف والأنواع</li>
-                </ol>
-            </nav>
+        <div class="container mt-4">
+            <h2 class="mb-4">إدارة الأصناف والأنواع</h2>
 
             <div class="row g-4">
 
