@@ -30,7 +30,6 @@ if ($user) {
 }
 if ($user) {
     $role = $user['role'];
-    # code...
 }
 // ---------- إعدادات ----------
 $perPage = 9;
@@ -175,9 +174,11 @@ unset($_SESSION['flash']);
 // helper cover (استعمال unsplash للكتب بدون غلاف)
 function cover_url($book)
 {
-    if (!empty($book['cover_image'])) return htmlspecialchars($book['cover_image']);
-    // $q = urlencode(($book['title'] ?? 'book') . ' ' . ($book['author'] ?? ''));
-    return "../assets/placeHolder.webp";
+    if (!empty($book['cover_image'])) {
+        return htmlspecialchars($book['cover_image']);
+    }
+
+    return '/assets/placeHolder.webp';
 }
 ?>
 <!doctype html>
@@ -236,39 +237,39 @@ function cover_url($book)
 </head>
 
 <body>
-    <div class="container py-4">
-        <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top">
-            <div class="container-fluid">
-                <a class="navbar-brand" href="/"><i class="fas fa-book-open text-primary"></i> مكتبتي</a>
-                <div class="d-flex gap-2 align-items-center">
-                    <?php if ($user_id) { ?>
+    <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/"><i class="fas fa-book-open text-primary"></i> مكتبتي</a>
+            <div class="d-flex gap-2 align-items-center">
+                <?php if ($user_id) { ?>
 
-                        <div class="d-flex align-items-center">
-                            <span class="navbar-text">مرحبا, <strong><?php echo htmlspecialchars($role); ?></strong></span>
-                        </div>
+                    <div class="d-flex align-items-center">
+                        <span class="navbar-text">مرحبا, <strong><?php echo htmlspecialchars($role); ?></strong></span>
+                    </div>
 
+                    <div class="dropdown">
+                        <a href="/profile" class="btn btn-outline-secondary"><i class="fas fa-user"></i> الملف الشخصي</a>
+                        <button class="btn btn-outline-danger" onclick="logout()"><i class="fas fa-sign-out-alt"></i> تسجيل الخروج</button>
+                        <a href="/me-loans" class="btn btn-outline-secondary"><i class="fas fa-book"></i> إعارتي</a>
+                    </div>
+                    <?php if ($role === 'superadmin' || $role === 'gestionnaire'): ?>
                         <div class="dropdown">
-                            <a href="/profile" class="btn btn-outline-secondary"><i class="fas fa-user"></i> الملف الشخصي</a>
-                            <button class="btn btn-outline-danger" onclick="logout()"><i class="fas fa-sign-out-alt"></i> تسجيل الخروج</button>
-                            <a href="/me-loans" class="btn btn-outline-secondary"><i class="fas fa-book"></i> إعارتي</a>
+                            <a href="/dashboard" class="btn btn-outline-secondary"><i class="fas fa-cog"></i> إدارة</a>
                         </div>
-                        <?php if ($role === 'superadmin' || $role === 'gestionnaire'): ?>
-                            <div class="dropdown">
-                                <a href="/dashboard" class="btn btn-outline-secondary"><i class="fas fa-cog"></i> إدارة</a>
-                            </div>
-                        <?php endif; ?>
-                    <?php } else { ?>
-                        <div class="d-flex align-items-center">
-                            <span class="navbar-text">مرحبا, <strong>زائر</strong></span>
-                        </div>
-                        <div class="dropdown">
-                            <a href="/login" class="btn btn-outline-primary"><i class="fas fa-sign-in-alt"></i> تسجيل الدخول</a>
-                            <a href="/register" class="btn btn-outline-success"><i class="fas fa-user-plus"></i> إنشاء حساب</a>
-                        </div>
-                    <?php } ?>
-                </div>
+                    <?php endif; ?>
+                <?php } else { ?>
+                    <div class="d-flex align-items-center">
+                        <span class="navbar-text">مرحبا, <strong>زائر</strong></span>
+                    </div>
+                    <div class="dropdown">
+                        <a href="/login" class="btn btn-outline-primary"><i class="fas fa-sign-in-alt"></i> تسجيل الدخول</a>
+                        <a href="/register" class="btn btn-outline-success"><i class="fas fa-user-plus"></i> إنشاء حساب</a>
+                    </div>
+                <?php } ?>
             </div>
-        </nav>
+        </div>
+    </nav>
+    <div class="container-fluid py-4">
 
         <div class="d-flex align-items-center justify-content-between mb-3">
             <div>

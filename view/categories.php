@@ -151,7 +151,7 @@ $categories = $db->query("SELECT * FROM categories")->fetchAll(PDO::FETCH_ASSOC)
             <!-- Breadcrumb / Go Back Links -->
             <nav aria-label="breadcrumb" class="mb-4">
                 <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="/"><i class="fas fa-home"></i> الرئيسية</a></li>
+                    <li class="breadcrumb-item"><a href="/dashboard"><i class="fas fa-home"></i> الرئيسية</a></li>
                     <li class="breadcrumb-item active" aria-current="page"><i class="fas fa-layer-group"></i> إدارة الأصناف والأنواع</li>
                 </ol>
             </nav>

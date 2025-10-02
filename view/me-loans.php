@@ -20,6 +20,8 @@ if (!$user) {
     exit;
 }
 
+$role = $user['role'];
+
 // جلب جميع الإعارات الخاصة بالمستخدم
 $stmt = $db->prepare("
     SELECT loans.id AS loan_id, books.title AS book_title, books.author AS book_author, loans.loan_date, loans.return_date, loans.status
@@ -40,8 +42,45 @@ $loans = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <title>جميع الإعارات</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css">
 </head>
+<style>
+    body {
+        background: #f7f9fc;
+    }
+</style>
 
 <body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/"><i class="fas fa-book-open text-primary"></i> مكتبتي</a>
+            <div class="d-flex gap-2 align-items-center">
+                <?php if ($user_id) { ?>
+
+                    <div class="d-flex align-items-center">
+                        <span class="navbar-text">مرحبا, <strong><?php echo htmlspecialchars($role); ?></strong></span>
+                    </div>
+
+                    <div class="dropdown">
+                        <a href="/profile" class="btn btn-outline-secondary"><i class="fas fa-user"></i> الملف الشخصي</a>
+                        <button class="btn btn-outline-danger" onclick="logout()"><i class="fas fa-sign-out-alt"></i> تسجيل الخروج</button>
+                        <a href="/me-loans" class="btn btn-outline-secondary"><i class="fas fa-book"></i> إعارتي</a>
+                    </div>
+                    <?php if ($role === 'superadmin' || $role === 'gestionnaire'): ?>
+                        <div class="dropdown">
+                            <a href="/dashboard" class="btn btn-outline-secondary"><i class="fas fa-cog"></i> إدارة</a>
+                        </div>
+                    <?php endif; ?>
+                <?php } else { ?>
+                    <div class="d-flex align-items-center">
+                        <span class="navbar-text">مرحبا, <strong>زائر</strong></span>
+                    </div>
+                    <div class="dropdown">
+                        <a href="/login" class="btn btn-outline-primary"><i class="fas fa-sign-in-alt"></i> تسجيل الدخول</a>
+                        <a href="/register" class="btn btn-outline-success"><i class="fas fa-user-plus"></i> إنشاء حساب</a>
+                    </div>
+                <?php } ?>
+            </div>
+        </div>
+    </nav>
     <div class="container mt-5">
         <h2 class="mb-4">جميع الإعارات الخاصة بك</h2>
         <nav aria-label="breadcrumb" class="mb-4">
