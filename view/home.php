@@ -71,11 +71,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
         } elseif ($create_new_adherent) {
             // حالة: إنشاء مستخدم جديد
-            $new_fullname = trim($_POST['new_fullname'] ?? '');
+            // $new_fullname = trim($_POST['new_fullname'] ?? '');
             $new_fullname = trim($_POST['new_fullname'] ?? '');
             $new_email = trim($_POST['new_email'] ?? '');
 
-            if (empty($new_fullname) || empty($new_fullname) || empty($new_email)) {
+            if (empty($new_fullname) || empty($new_email)) {
                 $_SESSION['flash'] = "يجب إدخال جميع بيانات المستعير الجديد.";
                 header("Location: " . $_SERVER['REQUEST_URI']);
                 exit;
@@ -87,16 +87,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
 
             // تحقق من عدم التكرار
-            $stmtCheck = $db->prepare("SELECT COUNT(*) FROM users WHERE fullname = ? OR email = ?");
-            $stmtCheck->execute([$new_fullname, $new_email]);
+            $stmtCheck = $db->prepare("SELECT COUNT(*) FROM users WHERE  email = ?");
+            $stmtCheck->execute([$new_email]);
             if ($stmtCheck->fetchColumn() > 0) {
-                $_SESSION['flash'] = "اسم المستخدم أو البريد الإلكتروني مستخدم بالفعل.";
+                $_SESSION['flash'] = " البريد الإلكتروني مستخدم بالفعل.";
                 header("Location: " . $_SERVER['REQUEST_URI']);
                 exit;
             }
 
             // إنشاء المستخدم الجديد بكلمة مرور '0' مؤقتة
-            $temp_password_hash = password_hash('0', PASSWORD_DEFAULT);
+            $temp_password_hash = password_hash('password', PASSWORD_DEFAULT);
             $default_role = 'adherent';
 
             $stmtInsert = $db->prepare("INSERT INTO users (fullname, email, password, role) VALUES (?, ?, ?, ?)");
@@ -107,7 +107,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 if ($user_id_for_loan) {
                     // تحديث كلمة المرور لتكون ID المستخدم (كما طلب المستخدم)
                     $new_id = $user_id_for_loan;
-                    $new_password_hash = password_hash(strval($new_id), PASSWORD_DEFAULT);
+                    $new_password = "password" . $new_id;
+                    $new_password_hash = password_hash($new_password, PASSWORD_DEFAULT);
                     $stmtUpdate = $db->prepare("UPDATE users SET password = ? WHERE id = ?");
                     $stmtUpdate->execute([$new_password_hash, $new_id]);
                 } else {
@@ -178,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $success_message = "تمّ طلب الكتاب بنجاح بواسطة **" . htmlspecialchars($loan_fullname) . "** — آخر أجل الإرجاع: " . htmlspecialchars($return_date);
 
     if ($create_new_adherent) {
-        $success_message .= ". تم إنشاء حساب جديد ($loan_fullname) برقم ID: $loan_id. كلمة المرور الافتراضية هي: **$loan_id**.";
+        $success_message .= ". تم إنشاء حساب جديد ($loan_fullname) برقم ID: $loan_id. كلمة المرور الافتراضية هي: **$new_password**.";
     }
 
     $_SESSION['flash'] = $success_message;
@@ -224,18 +225,9 @@ if ($type) {
     $where[] = "b.type_id = :type";
     $params[':type'] = $type;
 }
-if ($status === 'available') {
-    $where[] = "NOT EXISTS (
-        SELECT 1 
-        FROM loans l 
-        WHERE l.book_id = b.id AND l.return_date IS NULL
-    )";
-} elseif ($status === 'loaned') {
-    $where[] = "EXISTS (
-        SELECT 1 
-        FROM loans l 
-        WHERE l.book_id = b.id AND l.return_date IS NULL
-    )";
+if ($status === 'disponible' || $status === 'maear') {
+    $where[] = "b.status = :status";
+    $params[':status'] = $status;
 }
 
 $whereSQL = count($where) ? "WHERE " . implode(" AND ", $where) : "";
@@ -405,8 +397,8 @@ function cover_url($book)
                 <div class="col-auto">
                     <select name="status" class="form-select">
                         <option value="">كل الحالات</option>
-                        <option value="available" <?= ($status === 'available') ? 'selected' : '' ?>>متوفر</option>
-                        <option value="loaned" <?= ($status === 'loaned') ? 'selected' : '' ?>>معار</option>
+                        <option value="maear" <?= ($status === 'maear') ? 'selected' : '' ?>>معار</option>
+                        <option value="disponible" <?= ($status === 'disponible') ? 'selected' : '' ?>>متوفر</option>
                     </select>
                 </div>
 
@@ -428,7 +420,7 @@ function cover_url($book)
             <?php endif; ?>
 
             <?php foreach ($books as $b):
-                $isLoaned = $b['status'] === "maear";
+                $isLoaned = $b['status'] === 'maear';
                 $cover = cover_url($b);
             ?>
                 <div class="col-12 col-sm-6 col-md-4">
@@ -456,8 +448,9 @@ function cover_url($book)
                                                     'category' => $b['category_name'],
                                                     'type' => $b['type_name'],
                                                     'custom_id' => $b['custom_id'],
-                                                    'status' => $isLoaned ? 'معار' : 'متوفر',
-                                                    'description' => $b['excerpts'] ?: $b['notes'] ?: 'لا وصف متاح.',
+                                                    'status' => $b['status'],
+                                                    'notes' => $b['notes'],
+                                                    'excerpts' => $b['excerpts'],
                                                     'cover' => $cover
                                                 ], JSON_HEX_APOS | JSON_HEX_QUOT)) ?>'>
                                     <i class="fa fa-info-circle"></i> عرض التفاصيل
@@ -552,11 +545,11 @@ function cover_url($book)
                                         <h6 class="card-title text-primary"><i class="fas fa-user-plus"></i> مستعير جديد</h6>
                                         <input type="hidden" name="create_new_adherent" id="create_new_adherent_flag" value="0">
 
-                                        <div class="mb-2">
+                                        <!-- <div class="mb-2">
                                             <label for="new_fullname" class="form-label small">اسم المستخدم</label>
                                             <input type="text" name="new_fullname" id="new_fullname" class="form-control form-control-sm" placeholder="مثل: ahmed.l">
                                             <div class="invalid-feedback">مطلوب.</div>
-                                        </div>
+                                        </div> -->
                                         <div class="mb-2">
                                             <label for="new_fullname" class="form-label small">الاسم الكامل</label>
                                             <input type="text" name="new_fullname" id="new_fullname" class="form-control form-control-sm" placeholder="مثل: أحمد العزاوي">
@@ -590,27 +583,42 @@ function cover_url($book)
     </div>
 
     <div class="modal fade" id="detailsModal" tabindex="-1" aria-labelledby="detailsModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content" dir="rtl">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="detailsModalLabel">تفاصيل الكتاب</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="detailsModalLabel"><i class="fas fa-eye me-2"></i> تفاصيل الكتاب</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="modal-body d-flex gap-3">
-                    <div id="details_cover" style="width:150px;height:220px;background-size:cover;background-position:center;border-radius:0.5rem;"></div>
-                    <div class="flex-grow-1">
-                        <h5 id="details_title"></h5>
-                        <p class="small-note mb-1" id="details_author"></p>
-                        <p class="small-note mb-1" id="details_category"></p>
-                        <p class="small-note mb-1" id="details_type"></p>
-                        <p class="small-note mb-1" id="details_custom_id"></p>
-                        <p class="small-note mb-1" id="details_status"></p>
-                        <hr>
-                        <p id="details_description" class="small text-muted"></p>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-4 text-center mb-3">
+                            <img id="details_cover" src="/assets/placeHolder.webp" class="img-fluid rounded shadow-sm" style="max-height: 250px; object-fit: cover;" alt="غلاف الكتاب">
+                        </div>
+                        <div class="col-md-8">
+                            <h3 class="mb-3" id="details_title"></h3>
+                            <p class="text-muted">المؤلف: <strong id="details_author"></strong></p>
+                            <hr>
+                            <div class="row g-3 details-list">
+                                <div class="col-md-6"><small class="text-secondary">المعرّف المخصص:</small><br><strong id="details_custom_id"></strong></div>
+                                <div class="col-md-6"><small class="text-secondary">رقم قاعدة البيانات (ID):</small><br><strong id="details_id"></strong></div>
+                                <div class="col-md-6"><small class="text-secondary">الصنف:</small><br><strong id="details_category"></strong></div>
+                                <div class="col-md-6"><small class="text-secondary">النوع:</small><br><strong id="details_type"></strong></div>
+                                <div class="col-12"><small class="text-secondary">الحالة:</small><br><span id="details_status" class="badge"></span></div>
+                            </div>
+                            <hr>
+                            <div class="mt-3">
+                                <h6><i class="fas fa-list-alt me-1"></i> الملاحظات:</h6>
+                                <p id="details_notes" class="text-break"></p>
+                            </div>
+                            <div class="mt-3">
+                                <h6><i class="fas fa-quote-right me-1"></i> مقتطفات:</h6>
+                                <p id="details_excerpts" class="text-break"></p>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">إغلاق</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
                 </div>
             </div>
         </div>
@@ -628,24 +636,29 @@ function cover_url($book)
         const detailsCover = document.getElementById('details_cover');
         const detailsTitle = document.getElementById('details_title');
         const detailsAuthor = document.getElementById('details_author');
+        const detailsId = document.getElementById('details_id');
         const detailsCategory = document.getElementById('details_category');
         const detailsType = document.getElementById('details_type');
         const detailsCustomId = document.getElementById('details_custom_id');
         const detailsStatus = document.getElementById('details_status');
-        const detailsDescription = document.getElementById('details_description');
+        const detailsNotes = document.getElementById('details_notes');
+        const detailsExcerpts = document.getElementById('details_excerpts');
 
         detailsButtons.forEach(btn => {
             btn.addEventListener('click', () => {
                 try {
                     const book = JSON.parse(btn.getAttribute('data-book'));
-                    detailsCover.style.backgroundImage = `url('${book.cover}')`;
+                    detailsCover.src = book.cover;
                     detailsTitle.textContent = book.title;
-                    detailsAuthor.textContent = 'المؤلف: ' + (book.author || 'غير محدد');
-                    detailsCategory.textContent = 'الصنف: ' + (book.category || '—');
-                    detailsType.textContent = 'النوع: ' + (book.type || '—');
-                    detailsCustomId.textContent = 'الرمز: ' + (book.custom_id || '—');
-                    detailsStatus.textContent = 'الحالة: ' + book.status;
-                    detailsDescription.textContent = book.description;
+                    detailsAuthor.textContent = book.author || 'غير محدد';
+                    detailsId.textContent = book.id;
+                    detailsCategory.textContent = book.category || '—';
+                    detailsType.textContent = book.type || '—';
+                    detailsCustomId.textContent = book.custom_id || book.id;
+                    detailsStatus.className = 'badge ' + (book.status === 'disponible' ? 'bg-success' : 'bg-warning text-dark');
+                    detailsStatus.textContent = book.status === 'disponible' ? 'متوفر' : 'معار';
+                    detailsNotes.textContent = book.notes || 'لا توجد ملاحظات.';
+                    detailsExcerpts.textContent = book.excerpts || 'لا توجد مقتطفات.';
                     detailsModal.show();
                 } catch (err) {
                     console.error('خطأ في بيانات الكتاب:', err);
@@ -752,7 +765,7 @@ function cover_url($book)
             const createNewAdherentFlag = document.getElementById('create_new_adherent_flag');
             const addNewAdherentBtn = document.getElementById('addNewAdherentBtn');
             const cancelNewAdherentBtn = document.getElementById('cancelNewAdherentBtn');
-            const newfullnameInput = document.getElementById('new_fullname');
+            // const newfullnameInput = document.getElementById('new_fullname');
             const newFullnameInput = document.getElementById('new_fullname');
             const newEmailInput = document.getElementById('new_email');
 
@@ -777,13 +790,13 @@ function cover_url($book)
                 if (newAdherentInputGroup) {
                     newAdherentInputGroup.style.display = 'none';
                     createNewAdherentFlag.value = '0';
-                    newfullnameInput.removeAttribute('required');
+                    // newfullnameInput.removeAttribute('required');
                     newFullnameInput.removeAttribute('required');
                     newEmailInput.removeAttribute('required');
-                    newfullnameInput.classList.remove('is-invalid');
+                    // newfullnameInput.classList.remove('is-invalid');
                     newFullnameInput.classList.remove('is-invalid');
                     newEmailInput.classList.remove('is-invalid');
-                    newfullnameInput.value = '';
+                    // newfullnameInput.value = '';
                     newFullnameInput.value = '';
                     newEmailInput.value = '';
                 }
@@ -797,7 +810,7 @@ function cover_url($book)
                     if (modalSelectedUserId) modalSelectedUserId.value = ''; // Clear selection
 
                     // Set required for new fields
-                    newfullnameInput.setAttribute('required', 'required');
+                    // newfullnameInput.setAttribute('required', 'required');
                     newFullnameInput.setAttribute('required', 'required');
                     newEmailInput.setAttribute('required', 'required');
                 });
@@ -873,12 +886,12 @@ function cover_url($book)
 
                 // 2. Validate New Adherent fields (if flag is set)
                 if (createNewAdherentFlag && createNewAdherentFlag.value === '1') {
-                    if (newfullnameInput.value.trim() === '') {
-                        newfullnameInput.classList.add('is-invalid');
-                        isValid = false;
-                    } else {
-                        newfullnameInput.classList.remove('is-invalid');
-                    }
+                    // if (newfullnameInput.value.trim() === '') {
+                    //     newfullnameInput.classList.add('is-invalid');
+                    //     isValid = false;
+                    // } else {
+                    //     newfullnameInput.classList.remove('is-invalid');
+                    // }
 
                     if (newFullnameInput.value.trim() === '') {
                         newFullnameInput.classList.add('is-invalid');
@@ -912,11 +925,11 @@ function cover_url($book)
                 modalReturnDate.classList.remove('is-invalid');
             });
 
-            if (newfullnameInput) {
-                newfullnameInput.addEventListener('input', function() {
-                    this.classList.remove('is-invalid');
-                });
-            }
+            // if (newfullnameInput) {
+            //     newfullnameInput.addEventListener('input', function() {
+            //         this.classList.remove('is-invalid');
+            //     });
+            // }
             if (newFullnameInput) {
                 newFullnameInput.addEventListener('input', function() {
                     this.classList.remove('is-invalid');

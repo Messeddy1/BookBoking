@@ -1,6 +1,6 @@
 <?php
 session_start();
-require_once('./db_config.php'); 
+require_once('./db_config.php');
 
 
 if (!isset($_SESSION['user_id'])) {
@@ -100,6 +100,42 @@ if (isset($_GET['action'])) {
             $stmt = $db->prepare("DELETE FROM types WHERE id=?");
             $res = $stmt->execute([$id]);
             echo json_encode($res ? ['success' => true] : ['success' => false, 'message' => 'حدث خطأ']);
+            exit;
+
+        case 'get_books':
+            $category_id = intval($_GET['category_id'] ?? 0);
+            $type_id = intval($_GET['type_id'] ?? 0);
+
+            $where = [];
+            $params = [];
+
+            if ($category_id) {
+                $where[] = "b.category_id = :category_id";
+                $params[':category_id'] = $category_id;
+            }
+            if ($type_id) {
+                $where[] = "b.type_id = :type_id";
+                $params[':type_id'] = $type_id;
+            }
+
+            $whereClause = count($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+
+            $sql = "SELECT b.*, c.name as category_name, t.name as type_name,
+                   (SELECT COUNT(*) FROM loans l WHERE l.book_id = b.id AND l.return_date IS NULL) as active_loans
+                   FROM books b
+                   LEFT JOIN categories c ON c.id = b.category_id
+                   LEFT JOIN types t ON t.id = b.type_id
+                   $whereClause
+                   ORDER BY b.title ASC";
+
+            $stmt = $db->prepare($sql);
+            foreach ($params as $key => $value) {
+                $stmt->bindValue($key, $value);
+            }
+            $stmt->execute();
+            $books = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode(['success' => true, 'books' => $books]);
             exit;
 
         default:
@@ -251,6 +287,39 @@ $categories = $db->query("SELECT * FROM categories")->fetchAll(PDO::FETCH_ASSOC)
             </div>
         </div>
     </div>
+
+    <!-- Books Modal -->
+    <div class="modal fade" id="booksModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="booksModalTitle"><i class="fas fa-books me-2"></i></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>#</th>
+                                    <th>عنوان الكتاب</th>
+                                    <th>المؤلف</th>
+                                    <th>الصنف</th>
+                                    <th>النوع</th>
+                                    <th>الحالة</th>
+                                </tr>
+                            </thead>
+                            <tbody id="booksTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -283,6 +352,7 @@ $categories = $db->query("SELECT * FROM categories")->fetchAll(PDO::FETCH_ASSOC)
                 tr.innerHTML = `<td>${i+1}</td>
                         <td>${c.name}</td>
                         <td>
+                            <button class="btn btn-sm btn-primary me-1" onclick="viewCategoryBooks(${c.id},'${c.name}')"><i class="fas fa-book"></i></button>
                             <button class="btn btn-sm btn-info me-1" onclick="editCategory(${c.id})"><i class="fas fa-edit"></i></button>
                             <button class="btn btn-sm btn-danger" onclick="deleteCategory(${c.id})"><i class="fas fa-trash"></i></button>
                         </td>`;
@@ -309,6 +379,7 @@ $categories = $db->query("SELECT * FROM categories")->fetchAll(PDO::FETCH_ASSOC)
                         <td>${t.name}</td>
                         <td>${catName}</td>
                         <td>
+                            <button class="btn btn-sm btn-primary me-1" onclick="viewTypeBooks(${t.id},'${t.name}')"><i class="fas fa-book"></i></button>
                             <button class="btn btn-sm btn-info me-1" onclick="editType(${t.id},${t.category_id})"><i class="fas fa-edit"></i></button>
                             <button class="btn btn-sm btn-danger" onclick="deleteType(${t.id})"><i class="fas fa-trash"></i></button>
                         </td>`;
@@ -458,6 +529,55 @@ $categories = $db->query("SELECT * FROM categories")->fetchAll(PDO::FETCH_ASSOC)
         filterCategory.addEventListener('change', () => {
             loadTypes(filterCategory.value);
         });
+
+        const booksModal = new bootstrap.Modal(document.getElementById('booksModal'));
+        const booksModalTitle = document.getElementById('booksModalTitle');
+        const booksTableBody = document.getElementById('booksTableBody');
+
+        async function loadBooks(categoryId = null, typeId = null) {
+            let url = '?action=get_books';
+            if (categoryId) url += `&category_id=${categoryId}`;
+            if (typeId) url += `&type_id=${typeId}`;
+
+            const res = await fetch(url);
+            const data = await res.json();
+
+            if (data.success) {
+                booksTableBody.innerHTML = '';
+                if (data.books.length === 0) {
+                    booksTableBody.innerHTML = '<tr><td colspan="6" class="text-center p-4">لا توجد كتب</td></tr>';
+                    return;
+                }
+
+                data.books.forEach((book, index) => {
+                    const tr = document.createElement('tr');
+                    const isLoaned = parseInt(book.active_loans) > 0;
+                    tr.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${book.title}</td>
+                        <td>${book.author || 'غير محدد'}</td>
+                        <td>${book.category_name || '—'}</td>
+                        <td>${book.type_name || '—'}</td>
+                        <td><span class="badge ${isLoaned ? 'bg-warning text-dark' : 'bg-success'}">${isLoaned ? 'معار' : 'متوفر'}</span></td>
+                    `;
+                    booksTableBody.appendChild(tr);
+                });
+            }
+        }
+
+        window.viewCategoryBooks = async (categoryId, categoryName) => {
+            booksModalTitle.innerHTML = `<i class="fas fa-book me-2"></i> الكتب في صنف: ${categoryName}`;
+            booksTableBody.innerHTML = '<tr><td colspan="6" class="text-center"><div class="spinner-border text-primary" role="status"></div></td></tr>';
+            booksModal.show();
+            await loadBooks(categoryId);
+        }
+
+        window.viewTypeBooks = async (typeId, typeName) => {
+            booksModalTitle.innerHTML = `<i class="fas fa-book me-2"></i> الكتب في نوع: ${typeName}`;
+            booksTableBody.innerHTML = '<tr><td colspan="6" class="text-center"><div class="spinner-border text-primary" role="status"></div></td></tr>';
+            booksModal.show();
+            await loadBooks(null, typeId);
+        }
 
         loadCategories();
     </script>

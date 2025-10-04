@@ -268,8 +268,15 @@ if (isset($_GET['action'])) {
                     body: formData
                 });
                 const data = await res.json();
-                if (data.success) loadUsers();
-                else alert(data.message);
+                if (data.success) {
+                    Swal.fire('تم الحذف!', 'تم حذف المستخدم بنجاح.', 'success');
+                    loadUsers()
+                }else Swal.fire({
+                    title: 'خطأ',
+                    text: data.message,
+                    icon: 'error'
+                    
+                });
             }
 
             userForm.addEventListener('submit', async function(e) {

@@ -1,8 +1,9 @@
 <?php
 session_start();
-require_once('./db_config.php'); // path صحيح لقاعدة البيانات
+// NOTE: Assuming db_config.php contains PDO connection to $db
+require_once('./db_config.php');
 
-// تأكد من صلاحية المستخدم
+// --- 1. Authentication and Authorization ---
 if (!isset($_SESSION['user_id'])) {
     header('Location: /login');
     exit;
@@ -24,115 +25,151 @@ if ($role !== 'superadmin' && $role !== 'gestionnaire') {
     exit;
 }
 
-// الإحصائيات
+// --- 2. Initial Data Fetch for Stats and Dropdowns ---
 $totalBooks = $db->query("SELECT COUNT(*) FROM books")->fetchColumn();
+// Assuming status 'maear' means 'borrowed'
 $borrowedBooks = $db->query("SELECT COUNT(*) FROM books WHERE status='maear'")->fetchColumn();
 $Totalcategories = $db->query("SELECT COUNT(DISTINCT category_id) FROM books")->fetchColumn();
 
-// CRUD عبر AJAX
+// Fetch categories and types for JavaScript dropdowns and display mapping
+$categories_data = $db->query("SELECT * FROM categories")->fetchAll(PDO::FETCH_ASSOC);
+$types_all_data = $db->query("SELECT * FROM types")->fetchAll(PDO::FETCH_ASSOC);
+
+// Map categories by ID for easy lookup in JS (used for display)
+$categories_map = array_column($categories_data, 'name', 'id');
+
+// Map all types by ID for easy lookup in JS (used for details view)
+$all_types_map = array_column($types_all_data, 'name', 'id');
+
+// Map types by category_id for the dynamic "Add/Edit" form
+$bookTypes_by_category = [];
+foreach ($types_all_data as $t) {
+    // Assuming type_id is the primary key and not 1-indexed based on category
+    // For simplicity with your previous code, we'll map by category for the form
+    // The "index + 1" logic in your original JS was confusing, so we'll adjust the JS to use actual type IDs if available, 
+    // but keep the PHP structure for compatibility with the form logic.
+    $bookTypes_by_category[$t['category_id']][] = [
+        'id' => $t['id'],
+        'name' => $t['name']
+    ];
+}
+
+
+// --- 3. CRUD Handler via AJAX ---
 if (isset($_GET['action'])) {
     header('Content-Type: application/json');
     $action = $_GET['action'];
 
-    switch ($action) {
-        case 'get_books':
-            $stmt = $db->query("SELECT * FROM books ORDER BY id DESC");
-            echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
-            exit;
-
-        case 'get_book_details':
-            $id = intval($_GET['id']);
-            $stmt = $db->prepare("SELECT * FROM books WHERE id=?");
-            $stmt->execute([$id]);
-            echo json_encode($stmt->fetch(PDO::FETCH_ASSOC));
-            exit;
-
-        case 'add_book':
-        case 'update_book':
-            $id = intval($_POST['bookId'] ?? 0);
-            $title = trim($_POST['bookTitle'] ?? '');
-            $author = trim($_POST['bookAuthor'] ?? '');
-            $category_id = intval($_POST['bookCategory'] ?? 0);
-            $type_id = intval($_POST['bookType'] ?? 0);
-            $custom_id = trim($_POST['bookCustomId'] ?? '');
-            $notes = trim($_POST['bookNotes'] ?? '');
-            $excerpts = trim($_POST['bookExcerpts'] ?? '');
-            $status = 'disponible';
-
-            if (!$title || !$author || !$category_id) {
-                echo json_encode(['success' => false, 'message' => 'الرجاء ملء جميع الحقول الضرورية']);
+    try {
+        switch ($action) {
+            case 'get_books':
+                // Joins for efficient data retrieval (recommended for production)
+                $stmt = $db->query("
+                    SELECT 
+                        b.*, c.name AS category_name, t.name AS type_name 
+                    FROM books b
+                    LEFT JOIN categories c ON b.category_id = c.id
+                    LEFT JOIN types t ON b.type_id = t.id
+                    ORDER BY b.id DESC
+                ");
+                echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
                 exit;
-            }
 
-            // رفع صورة الغلاف
-            $cover_image = '';
-            if (isset($_FILES['bookCover']) && $_FILES['bookCover']['error'] === 0) {
-                $ext = pathinfo($_FILES['bookCover']['name'], PATHINFO_EXTENSION);
-                $allowed = ['jpg', 'jpeg', 'png', 'webp'];
-                if (!in_array(strtolower($ext), $allowed)) {
-                    echo json_encode(['success' => false, 'message' => 'صيغة صورة غير مسموح بها']);
+            case 'get_book_details':
+                $id = intval($_GET['id']);
+                // Fetch book details with category and type names
+                $stmt = $db->prepare("
+                    SELECT 
+                        b.*, c.name AS category_name, t.name AS type_name 
+                    FROM books b
+                    LEFT JOIN categories c ON b.category_id = c.id
+                    LEFT JOIN types t ON b.type_id = t.id
+                    WHERE b.id=?
+                ");
+                $stmt->execute([$id]);
+                echo json_encode($stmt->fetch(PDO::FETCH_ASSOC));
+                exit;
+
+            case 'add_book':
+            case 'update_book':
+                $id = intval($_POST['bookId'] ?? 0);
+                $title = trim($_POST['bookTitle'] ?? '');
+                $author = trim($_POST['bookAuthor'] ?? '');
+                $category_id = intval($_POST['bookCategory'] ?? 0);
+                $type_id = intval($_POST['bookType'] ?? 0);
+                $custom_id = trim($_POST['bookCustomId'] ?? '');
+                $notes = trim($_POST['bookNotes'] ?? '');
+                $excerpts = trim($_POST['bookExcerpts'] ?? '');
+                $status = 'disponible';
+
+                if (!$title || !$author || !$category_id || !$type_id) {
+                    echo json_encode(['success' => false, 'message' => 'الرجاء ملء جميع الحقول الضرورية (العنوان، المؤلف، الصنف، النوع)']);
                     exit;
                 }
-                if (!is_dir('uploads/covers')) mkdir('uploads/covers', 0777, true);
-                $cover_image = 'uploads/covers/' . uniqid() . '.' . $ext;
-                move_uploaded_file($_FILES['bookCover']['tmp_name'], $cover_image);
-            }
 
-            // توليد custom_id تلقائي
-            if (!$custom_id) $custom_id = 'BK' . time();
-
-            if ($action === 'add_book') {
-                $stmt = $db->prepare("INSERT INTO books (title, author, category_id, type_id, custom_id, cover_image, notes, excerpts, status) VALUES (?,?,?,?,?,?,?,?,?)");
-                $res = $stmt->execute([$title, $author, $category_id, $type_id, $custom_id, $cover_image, $notes, $excerpts, $status]);
-            } else {
-                if ($cover_image) {
-                    $stmt = $db->prepare("UPDATE books SET title=?, author=?, category_id=?, type_id=?, custom_id=?, cover_image=?, notes=?, excerpts=?, status=? WHERE id=?");
-                    $res = $stmt->execute([$title, $author, $category_id, $type_id, $custom_id, $cover_image, $notes, $excerpts, $status, $id]);
-                } else {
-                    $stmt = $db->prepare("UPDATE books SET title=?, author=?, category_id=?, type_id=?, custom_id=?, notes=?, excerpts=?, status=? WHERE id=?");
-                    $res = $stmt->execute([$title, $author, $category_id, $type_id, $custom_id, $notes, $excerpts, $status, $id]);
+                $cover_image = '';
+                if (isset($_FILES['bookCover']) && $_FILES['bookCover']['error'] === 0) {
+                    $ext = pathinfo($_FILES['bookCover']['name'], PATHINFO_EXTENSION);
+                    $allowed = ['jpg', 'jpeg', 'png', 'webp'];
+                    if (!in_array(strtolower($ext), $allowed)) {
+                        echo json_encode(['success' => false, 'message' => 'صيغة صورة غير مسموح بها']);
+                        exit;
+                    }
+                    if (!is_dir('uploads/covers')) mkdir('uploads/covers', 0777, true);
+                    $cover_image = 'uploads/covers/' . uniqid() . '.' . $ext;
+                    move_uploaded_file($_FILES['bookCover']['tmp_name'], $cover_image);
                 }
-            }
 
-            echo json_encode($res ? ['success' => true] : ['success' => false, 'message' => 'حدث خطأ']);
-            exit;
+                if (!$custom_id) $custom_id = 'BK' . time();
 
-        case 'delete_book':
-            $id = intval($_POST['id'] ?? 0);
-            if (!$id) {
-                echo json_encode(['success' => false, 'message' => 'ID غير صالح']);
+                if ($action === 'add_book') {
+                    $stmt = $db->prepare("INSERT INTO books (title, author, category_id, type_id, custom_id, cover_image, notes, excerpts, status) VALUES (?,?,?,?,?,?,?,?,?)");
+                    $res = $stmt->execute([$title, $author, $category_id, $type_id, $custom_id, $cover_image, $notes, $excerpts, $status]);
+                } else {
+                    if ($cover_image) {
+                        $stmt = $db->prepare("UPDATE books SET title=?, author=?, category_id=?, type_id=?, custom_id=?, cover_image=?, notes=?, excerpts=?, status=? WHERE id=?");
+                        $res = $stmt->execute([$title, $author, $category_id, $type_id, $custom_id, $cover_image, $notes, $excerpts, $status, $id]);
+                    } else {
+                        $stmt = $db->prepare("UPDATE books SET title=?, author=?, category_id=?, type_id=?, custom_id=?, notes=?, excerpts=?, status=? WHERE id=?");
+                        $res = $stmt->execute([$title, $author, $category_id, $type_id, $custom_id, $notes, $excerpts, $status, $id]);
+                    }
+                }
+
+                echo json_encode($res ? ['success' => true] : ['success' => false, 'message' => 'حدث خطأ']);
                 exit;
-            }
 
-            $stmt = $db->prepare("SELECT cover_image FROM books WHERE id=?");
-            $stmt->execute([$id]);
-            $book = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($book && $book['cover_image'] && file_exists($book['cover_image'])) unlink($book['cover_image']);
+            case 'delete_book':
+                $id = intval($_POST['id'] ?? 0);
+                if (!$id) {
+                    echo json_encode(['success' => false, 'message' => 'ID غير صالح']);
+                    exit;
+                }
 
-            $stmt = $db->prepare("DELETE FROM books WHERE id=?");
-            $res = $stmt->execute([$id]);
-            echo json_encode($res ? ['success' => true] : ['success' => false, 'message' => 'حدث خطأ أثناء الحذف']);
-            exit;
-        case 'logout':
-            session_destroy();
-            echo json_encode(['success' => true]);
-            exit;
-        default:
-            echo json_encode(['success' => false, 'message' => 'Action غير معروف']);
-            exit;
+                $stmt = $db->prepare("SELECT cover_image FROM books WHERE id=?");
+                $stmt->execute([$id]);
+                $book = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($book && $book['cover_image'] && file_exists($book['cover_image'])) unlink($book['cover_image']);
+
+                $stmt = $db->prepare("DELETE FROM books WHERE id=?");
+                $res = $stmt->execute([$id]);
+                echo json_encode($res ? ['success' => true] : ['success' => false, 'message' => 'حدث خطأ أثناء الحذف']);
+                exit;
+
+            case 'logout':
+                session_destroy();
+                echo json_encode(['success' => true]);
+                exit;
+
+            default:
+                echo json_encode(['success' => false, 'message' => 'Action غير معروف']);
+                exit;
+        }
+    } catch (PDOException $e) {
+        error_log("DB Error: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'خطأ في قاعدة البيانات: ' . $e->getMessage()]);
+        exit;
     }
 }
-
-// get categories and types
-$categories = $db->query("SELECT * FROM categories")->fetchAll(PDO::FETCH_ASSOC);
-$types_all = $db->query("SELECT * FROM types")->fetchAll(PDO::FETCH_ASSOC);
-
-// تحويل الـ types إلى مصفوفة حسب category_id للـ JS
-$bookTypes = [];
-foreach ($types_all as $t) {
-    $bookTypes[$t['category_id']][] = $t['name'];
-}
-
 ?>
 
 <!DOCTYPE html>
@@ -170,6 +207,7 @@ foreach ($types_all as $t) {
             font-weight: 600;
         }
 
+        /* Styling for the Edit/Add Modal Header */
         .modal-header {
             background: #0d6efd;
             color: white;
@@ -182,6 +220,22 @@ foreach ($types_all as $t) {
         .spinner-border {
             width: 3rem;
             height: 3rem;
+        }
+
+        /* Styling for the Details Modal Content */
+        .details-list strong {
+            display: block;
+            font-size: 1.05em;
+            color: #333;
+        }
+
+        .details-list small {
+            font-weight: 500;
+        }
+
+        #detailCoverImage {
+            width: 100%;
+            height: 250px;
         }
     </style>
 </head>
@@ -210,14 +264,13 @@ foreach ($types_all as $t) {
     <div class="container-fluid mt-4">
         <h2 class="mb-4">لوحة التحكم</h2>
 
-        <!-- Stats Cards -->
         <div class="row g-4 mb-4">
             <div class="col-md-4">
                 <div class="card shadow-sm border-0">
                     <div class="card-body d-flex justify-content-between align-items-center">
                         <div>
                             <h5 class="card-title">إجمالي الكتب</h5>
-                            <p class="card-text fs-2 fw-bold" id="totalBooks"></p>
+                            <p class="card-text fs-2 fw-bold" id="totalBooks"><?php echo $totalBooks; ?></p>
                         </div>
                         <i class="fas fa-book card-icon text-primary"></i>
                     </div>
@@ -246,8 +299,7 @@ foreach ($types_all as $t) {
                 </div>
             </div>
         </div>
-
-        <!-- Books Table -->
+        <!-- start -->
         <div class="card shadow-sm border-0">
             <div class="card-header bg-light d-flex flex-wrap justify-content-between align-items-center">
                 <h5 class="mb-3">قائمة الكتب</h5>
@@ -259,15 +311,15 @@ foreach ($types_all as $t) {
                     <!-- Search & Filter -->
                     <div class="d-flex flex-grow-1 align-items-center gap-2">
                         <!-- Search Input -->
-                        <div class="input-group flex-grow-1">
+                        <div class="input-group">
                             <span class="input-group-text"><i class="fas fa-search"></i></span>
-                            <input type="text" class="form-control" id="searchInput" placeholder="بحث...">
+                            <input type="text" class="form-control" id="searchInput" placeholder="بحث (العنوان، المؤلف، المعرّف)...">
                         </div>
 
                         <!-- Category Filter -->
                         <select class="form-select w-auto" id="filterCategory">
                             <option value="">كل الأصناف</option>
-                            <?php foreach ($categories as $cat) : ?>
+                            <?php foreach ($categories_data as $cat) : ?>
                                 <option value="<?php echo $cat['id']; ?>"><?php echo htmlspecialchars($cat['name']); ?></option>
                             <?php endforeach; ?>
                         </select>
@@ -285,175 +337,270 @@ foreach ($types_all as $t) {
                     <?php endif; ?>
                 </div>
             </div>
+            <!-- end -->
 
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover align-middle">
-                        <thead class="table-light">
-                            <tr>
-                                <th scope="col">صورة</th>
-                                <th scope="col">المعرّف</th>
-                                <th scope="col">عنوان الكتاب</th>
-                                <th scope="col">المؤلف</th>
-                                <th scope="col">الصنف</th>
-                                <th scope="col">الحالة</th>
-                                <th scope="col">إجراءات</th>
-                            </tr>
-                        </thead>
-                        <tbody id="booksTableBody">
-                            <tr>
-                                <td colspan="7" class="text-center p-5">
-                                    <div class="spinner-border text-primary" role="status"></div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
 
-        <!-- Modal -->
-        <div class="modal fade" id="bookModal" tabindex="-1">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="bookModalLabel">إضافة كتاب جديد</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <form id="bookForm" enctype="multipart/form-data">
-                            <input type="hidden" id="bookId" name="bookId">
-                            <div class="row g-3">
-                                <div class="col-md-6"><label>عنوان الكتاب</label><input type="text" class="form-control" name="bookTitle" id="bookTitle" required></div>
-                                <div class="col-md-6"><label>اسم المؤلف</label><input type="text" class="form-control" name="bookAuthor" id="bookAuthor" required></div>
-                                <div class="col-md-6"><label>الصنف</label><select class="form-select" name="bookCategory" id="bookCategory" required></select></div>
-                                <div class="col-md-6"><label>النوع</label><select class="form-select" name="bookType" id="bookType" required></select></div>
-                                <div class="col-md-6"><label>المعرّف المخصص</label><input type="text" class="form-control" id="bookCustomId" name="bookCustomId" placeholder="سيتم إنشاؤه تلقائيا"></div>
-                                <div class="col-md-6"><label>صورة الغلاف</label><input type="file" class="form-control" id="bookCover" name="bookCover"></div>
-                                <div class="col-12"><label>ملاحظات</label><textarea class="form-control" id="bookNotes" name="bookNotes" rows="3"></textarea></div>
-                                <div class="col-12"><label>مقتطفات</label><textarea class="form-control" id="bookExcerpts" name="bookExcerpts" rows="3"></textarea></div>
-                            </div>
-                            <div class="modal-footer mt-3">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
-                                <button type="submit" class="btn btn-primary">حفظ</button>
-                            </div>
-                        </form>
+            <div class="card shadow-sm border-0">
+
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th scope="col">صورة</th>
+                                    <th scope="col">المعرّف</th>
+                                    <th scope="col">عنوان الكتاب</th>
+                                    <th scope="col">المؤلف</th>
+                                    <th scope="col">الصنف</th>
+                                    <th scope="col">الحالة</th>
+                                    <th scope="col">إجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="booksTableBody">
+                                <tr>
+                                    <td colspan="7" class="text-center p-5">
+                                        <div class="spinner-border text-primary" role="status"></div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-        <script>
-            function logout() {
-                // Add logout functionality here delete the user from the session
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', '?action=logout', true);
-                xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-                xhr.onreadystatechange = function() {
-                    if (xhr.readyState === 4 && xhr.status === 200) {
-                        const response = JSON.parse(xhr.responseText);
-                        if (response.success) {
-                            window.location.href = '/login';
-                        } else {
-                            alert(response.message);
-                        }
-                    }
-                };
-                xhr.send();
-            }
-            document.addEventListener('DOMContentLoaded', function() {
-                const bookModal = new bootstrap.Modal(document.getElementById('bookModal'));
-                const bookForm = document.getElementById('bookForm');
-                const categorySelect = document.getElementById('bookCategory');
-                const typeSelect = document.getElementById('bookType');
-                const booksTableBody = document.getElementById('booksTableBody');
+            <div class="modal fade" id="bookModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="bookModalLabel">إضافة كتاب جديد</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="bookForm" enctype="multipart/form-data">
+                                <input type="hidden" id="bookId" name="bookId">
+                                <div class="row g-3">
+                                    <div class="col-md-6"><label>عنوان الكتاب</label><input type="text" class="form-control" name="bookTitle" id="bookTitle" required></div>
+                                    <div class="col-md-6"><label>اسم المؤلف</label><input type="text" class="form-control" name="bookAuthor" id="bookAuthor" required></div>
+                                    <div class="col-md-6"><label>الصنف</label><select class="form-select" name="bookCategory" id="bookCategory" required></select></div>
+                                    <div class="col-md-6"><label>النوع</label><select class="form-select" name="bookType" id="bookType" required></select></div>
+                                    <div class="col-md-6"><label>المعرّف المخصص</label><input type="text" class="form-control" id="bookCustomId" name="bookCustomId" placeholder="سيتم إنشاؤه تلقائيا"></div>
+                                    <div class="col-md-6"><label>صورة الغلاف</label><input type="file" class="form-control" id="bookCover" name="bookCover"></div>
+                                    <div class="col-12"><label>ملاحظات</label><textarea class="form-control" id="bookNotes" name="bookNotes" rows="3"></textarea></div>
+                                    <div class="col-12"><label>مقتطفات</label><textarea class="form-control" id="bookExcerpts" name="bookExcerpts" rows="3"></textarea></div>
+                                </div>
+                                <div class="modal-footer mt-3">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
+                                    <button type="submit" class="btn btn-primary" id="saveBookBtn"><i class="fas fa-save"></i> حفظ</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-                const categories = <?php echo json_encode(array_column($categories, 'name', 'id')); ?>;
-                const bookTypes = <?php echo json_encode($bookTypes); ?>;
+            <div class="modal fade" id="bookDetailsModal" tabindex="-1" aria-labelledby="bookDetailsModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header bg-primary text-white">
+                            <h5 class="modal-title" id="bookDetailsModalLabel"><i class="fas fa-eye me-2"></i> تفاصيل الكتاب</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="row">
+                                <div class="col-md-4 text-center mb-3">
+                                    <img id="detailCoverImage" src="https://via.placeholder.com/150x200?text=No+Image" class="img-fluid rounded shadow-sm" style="max-height: 250px; object-fit: cover;" alt="غلاف الكتاب">
+                                </div>
+                                <div class="col-md-8">
+                                    <h3 class="mb-3" id="detailTitle"></h3>
+                                    <p class="text-muted">المؤلف: <strong id="detailAuthor"></strong></p>
+                                    <hr>
+                                    <div class="row g-3 details-list">
+                                        <div class="col-md-6"><small class="text-secondary">المعرّف المخصص:</small><br><strong id="detailCustomId"></strong></div>
+                                        <div class="col-md-6"><small class="text-secondary">رقم قاعدة البيانات (ID):</small><br><strong id="detailId"></strong></div>
+                                        <div class="col-md-6"><small class="text-secondary">الصنف:</small><br><strong id="detailCategory"></strong></div>
+                                        <div class="col-md-6"><small class="text-secondary">النوع:</small><br><strong id="detailType"></strong></div>
+                                        <div class="col-12"><small class="text-secondary">الحالة:</small><br><span id="detailStatus" class="badge"></span></div>
+                                    </div>
+                                    <hr>
+                                    <div class="mt-3">
+                                        <h6><i class="fas fa-list-alt me-1"></i> الملاحظات:</h6>
+                                        <p id="detailNotes" class="text-break"></p>
+                                    </div>
+                                    <div class="mt-3">
+                                        <h6><i class="fas fa-quote-right me-1"></i> مقتطفات:</h6>
+                                        <p id="detailExcerpts" class="text-break"></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-                // Load Categories
-                for (let key in categories) {
-                    const opt = document.createElement('option');
-                    opt.value = key;
-                    opt.textContent = categories[key];
-                    categorySelect.appendChild(opt);
+
+            <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+            <script>
+                // PHP Variables mapped to JS
+                const CATEGORIES = <?php echo json_encode($categories_map); ?>;
+                const BOOK_TYPES_BY_CATEGORY = <?php echo json_encode($bookTypes_by_category); ?>;
+
+                // Global store for books to enable fast filtering/editing
+                let allBooks = [];
+                let bookDetailsModalInstance;
+
+                function logout() {
+                    // Simplified POST request for logout
+                    fetch('?action=logout', {
+                            method: 'POST'
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                window.location.href = '/login';
+                            } else {
+                                Swal.fire('خطأ', 'فشل تسجيل الخروج.', 'error');
+                            }
+                        })
+                        .catch(() => Swal.fire('خطأ', 'فشل الاتصال بالخادم.', 'error'));
                 }
 
-                function updateTypeDropdown(selectedCategory, selectedType = null) {
+                // Populates the type dropdown based on the selected category
+                function updateTypeDropdown(selectedCategory, selectedTypeId = null) {
+                    const typeSelect = document.getElementById('bookType');
                     typeSelect.innerHTML = '<option selected disabled value="">اختر النوع...</option>';
-                    if (bookTypes[selectedCategory]) {
-                        bookTypes[selectedCategory].forEach((type, index) => {
+
+                    const types = BOOK_TYPES_BY_CATEGORY[selectedCategory];
+
+                    if (types && types.length > 0) {
+                        types.forEach(type => {
                             const opt = document.createElement('option');
-                            opt.value = index + 1;
-                            opt.textContent = type;
-                            if (selectedType && parseInt(selectedType) === index + 1) opt.selected = true;
+                            opt.value = type.id;
+                            opt.textContent = type.name;
+                            if (selectedTypeId && parseInt(selectedTypeId) === parseInt(type.id)) {
+                                opt.selected = true;
+                            }
                             typeSelect.appendChild(opt);
                         });
                     }
                 }
 
-                async function loadBooks() {
+                // Function to render the table based on the current filtered list
+                function renderBooks(books) {
+                    const booksTableBody = document.getElementById('booksTableBody');
+                    if (!books.length) {
+                        booksTableBody.innerHTML = '<tr><td colspan="7" class="text-center">لا توجد كتب مطابقة</td></tr>';
+                        return;
+                    }
 
+                    booksTableBody.innerHTML = '';
+                    books.forEach(book => {
+                        const tr = document.createElement('tr');
+                        const statusBadge = book.status === 'disponible' ?
+                            '<span class="badge bg-success">متوفر</span>' :
+                            '<span class="badge bg-warning text-dark">معار</span>';
 
-                    booksTableBody.innerHTML = '<tr><td colspan="7" class="text-center p-5"><div class="spinner-border text-primary" role="status"></div></td></tr>';
-                    const res = await fetch('?action=get_books');
-                    const books = await res.json();
-                    filteredBooks = books;
-                    // get length of books
-                    const totalBooks = books.length;
-                    document.getElementById('totalBooks').textContent = totalBooks;
-                    document.getElementById('filterCategory').value = '';
-                    // when selct category filter
-                    document.getElementById('filterCategory').addEventListener('change', (e) => {
-                        const categoryId = e.target.value;
-                        if (categoryId) {
-                            filteredBooks = books.filter(b => b.category_id == categoryId);
-                        } else {
-                            filteredBooks = books;
-                        }
-                        renderBooks(filteredBooks);
+                        tr.innerHTML = `
+                        <td><img src="${book.cover_image ? book.cover_image : 'https://via.placeholder.com/50x70?text=No+Image'}" class="book-cover-sm" alt="غلاف"></td>
+                        <td>${book.custom_id}</td>
+                        <td>${book.title}</td>
+                        <td>${book.author}</td>
+                        <td>${book.category_name || 'غير معروف'}</td>
+                        <td>${statusBadge}</td>
+                        <td>
+                            <button class="btn btn-sm btn-primary me-1" onclick="viewBookDetails(${book.id})" title="عرض التفاصيل"><i class="fas fa-eye"></i></button>
+                            <button class="btn btn-sm btn-info text-white me-1" onclick="editBook(${book.id})" title="تعديل"><i class="fas fa-edit"></i></button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteBook(${book.id})" title="حذف"><i class="fas fa-trash-alt"></i></button>
+                        </td>
+                    `;
+                        booksTableBody.appendChild(tr);
                     });
-                    document.getElementById('searchInput').addEventListener('input', (e) => {
-                        const searchTerm = e.target.value.toLowerCase();
-                        filteredBooks = filteredBooks.filter(b =>
+                }
+
+                // Function to apply search and filter logic
+                function applyFiltersAndSearch() {
+                    const categoryId = document.getElementById('filterCategory').value;
+                    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+
+                    let currentBooks = allBooks;
+
+                    // 1. Filter by Category
+                    if (categoryId) {
+                        currentBooks = currentBooks.filter(b => b.category_id == categoryId);
+                    }
+
+                    // 2. Filter by Search Term
+                    if (searchTerm) {
+                        currentBooks = currentBooks.filter(b =>
                             b.title.toLowerCase().includes(searchTerm) ||
                             b.author.toLowerCase().includes(searchTerm) ||
                             b.custom_id.toLowerCase().includes(searchTerm)
                         );
-                        renderBooks(filteredBooks);
-                    });
-
-                    function renderBooks(books) {
-                        if (!books.length) {
-                            booksTableBody.innerHTML = '<tr><td colspan="7" class="text-center">لا توجد كتب</td></tr>';
-                            return;
-                        }
-                        booksTableBody.innerHTML = '';
-                        books.forEach(book => {
-                            const tr = document.createElement('tr');
-                            tr.innerHTML = `
-                                <td><img src="${book.cover_image ? book.cover_image : 'https://via.placeholder.com/50x70?text=No+Image'}" class="book-cover-sm"></td>
-                                <td>${book.custom_id}</td>
-                                <td>${book.title}</td>
-                                <td>${book.author}</td>
-                                <td>${categories[book.category_id] || 'غير معروف'}</td>
-                                <td>${book.status === 'disponible' ? '<span class="badge bg-success">متوفر</span>' : '<span class="badge bg-warning text-dark">معار</span>'}</td>
-                                <td>
-                                    <button class="btn btn-sm btn-info text-white me-1" onclick="editBook(${book.id})"><i class="fas fa-edit"></i></button>
-                                    <button class="btn btn-sm btn-danger" onclick="deleteBook(${book.id})"><i class="fas fa-trash-alt"></i></button>
-                                </td>
-                            `;
-                            booksTableBody.appendChild(tr);
-                        });
                     }
-                    renderBooks(books);
+
+                    renderBooks(currentBooks);
                 }
 
-                window.editBook = async function(id) {
+                // Main function to load data from the server
+                async function loadBooks() {
+                    const booksTableBody = document.getElementById('booksTableBody');
+                    booksTableBody.innerHTML = '<tr><td colspan="7" class="text-center p-5"><div class="spinner-border text-primary" role="status"></div></td></tr>';
+
+                    const res = await fetch('?action=get_books');
+                    allBooks = await res.json();
+
+                    // Update total stats
+                    document.getElementById('totalBooks').textContent = allBooks.length;
+
+                    applyFiltersAndSearch();
+                }
+
+                // --- NEW: View Book Details Function ---
+                window.viewBookDetails = async function(id) {
+                    // Fetch fresh details with category/type names (using your new AJAX endpoint)
                     const res = await fetch(`?action=get_book_details&id=${id}`);
                     const book = await res.json();
+
+                    if (!book || !book.id) {
+                        Swal.fire('خطأ', 'لم يتم العثور على تفاصيل الكتاب.', 'error');
+                        return;
+                    }
+
+                    document.getElementById('detailTitle').textContent = book.title;
+                    document.getElementById('detailAuthor').textContent = book.author || 'غير محدد';
+                    document.getElementById('detailCustomId').textContent = book.custom_id;
+                    document.getElementById('detailId').textContent = book.id;
+                    document.getElementById('detailCategory').textContent = book.category_name || 'غير معروف';
+                    document.getElementById('detailType').textContent = book.type_name || 'غير معروف';
+                    document.getElementById('detailNotes').textContent = book.notes || 'لا يوجد ملاحظات.';
+                    document.getElementById('detailExcerpts').textContent = book.excerpts || 'لا يوجد مقتطفات.';
+
+                    const imgSource = (book.cover_image && book.cover_image.length > 0) ?
+                        book.cover_image :
+                        'https://via.placeholder.com/150x200?text=No+Image';
+                    document.getElementById('detailCoverImage').src = imgSource;
+
+                    const statusEl = document.getElementById('detailStatus');
+                    statusEl.textContent = book.status === 'disponible' ? 'متوفر' : 'معار';
+                    statusEl.className = 'badge ' + (book.status === 'disponible' ? 'bg-success' : 'bg-warning text-dark');
+
+                    bookDetailsModalInstance.show();
+                }
+                // ----------------------------------------
+
+                // Edit Book Function (re-uses existing form and modal)
+                window.editBook = function(id) {
+                    // Find book data from the cached allBooks array
+                    const book = allBooks.find(b => b.id == id);
+
+                    if (!book) {
+                        Swal.fire('خطأ', 'لم يتم العثور على الكتاب المراد تعديله.', 'error');
+                        return;
+                    }
+
                     document.getElementById('bookId').value = book.id;
                     document.getElementById('bookTitle').value = book.title;
                     document.getElementById('bookAuthor').value = book.author;
@@ -461,13 +608,17 @@ foreach ($types_all as $t) {
                     document.getElementById('bookNotes').value = book.notes;
                     document.getElementById('bookExcerpts').value = book.excerpts;
                     document.getElementById('bookCategory').value = book.category_id;
+                    document.getElementById('bookCover').value = '';
+
                     updateTypeDropdown(book.category_id, book.type_id);
                     document.getElementById('bookModalLabel').textContent = 'تعديل الكتاب';
+
+                    const bookModal = bootstrap.Modal.getInstance(document.getElementById('bookModal'));
                     bookModal.show();
                 }
 
+                // Delete Book Function (remains the same)
                 window.deleteBook = async function(id) {
-                    /// sweetalert here
                     const result = await Swal.fire({
                         title: 'هل أنت متأكد من حذف هذا الكتاب؟',
                         text: "لا يمكن التراجع عن هذا الإجراء!",
@@ -481,55 +632,96 @@ foreach ($types_all as $t) {
 
                     const formData = new FormData();
                     formData.append('id', id);
+
                     const res = await fetch('?action=delete_book', {
                         method: 'POST',
                         body: formData
                     });
+
                     const data = await res.json();
+
                     if (data.success) {
                         Swal.fire('تم الحذف!', 'تم حذف الكتاب بنجاح.', 'success');
-                        loadBooks();
+                        loadBooks(); // Reload data
                     } else {
                         Swal.fire('خطأ', data.message, 'error');
                     }
                 }
 
-                bookForm.addEventListener('submit', async function(e) {
-                    e.preventDefault();
-                    const formData = new FormData(bookForm);
-                    const action = formData.get('bookId') ? 'update_book' : 'add_book';
-                    const res = await fetch(`?action=${action}`, {
-                        method: 'POST',
-                        body: formData
-                    });
-                    const data = await res.json();
-                    if (data.success) {
-                        // sweetalert success
-                        Swal.fire('تم الحفظ!', 'تم حفظ الكتاب بنجاح.', 'success');
-                        bookForm.reset();
-                        bookModal.hide();
-                        loadBooks();
-                    } else {
-                        // sweetalert error
-                        Swal.fire('خطأ', data.message, 'error');
+                // --- DOM Ready Logic ---
+                document.addEventListener('DOMContentLoaded', function() {
+                    const bookModal = new bootstrap.Modal(document.getElementById('bookModal'));
+                    bookDetailsModalInstance = new bootstrap.Modal(document.getElementById('bookDetailsModal')); // Initialize new modal
+                    const bookForm = document.getElementById('bookForm');
+                    const categorySelect = document.getElementById('bookCategory');
+
+                    // Initialize Category dropdown options in Add/Edit modal
+                    categorySelect.innerHTML = '<option selected disabled value="">اختر الصنف...</option>';
+                    for (let id in CATEGORIES) {
+                        const opt = document.createElement('option');
+                        opt.value = id;
+                        opt.textContent = CATEGORIES[id];
+                        categorySelect.appendChild(opt);
                     }
-                });
 
-                document.getElementById('addBookBtn').addEventListener('click', function() {
-                    bookForm.reset();
-                    document.getElementById('bookId').value = '';
-                    document.getElementById('bookModalLabel').textContent = 'إضافة كتاب جديد';
-                    updateTypeDropdown(Object.keys(categories)[0]);
-                    bookModal.show();
-                });
+                    // Event listener for Add Book button
+                    document.getElementById('addBookBtn').addEventListener('click', function() {
+                        bookForm.reset();
+                        document.getElementById('bookId').value = '';
+                        document.getElementById('bookModalLabel').textContent = 'إضافة كتاب جديد';
+                        if (Object.keys(CATEGORIES).length > 0) {
+                            categorySelect.value = Object.keys(CATEGORIES)[0]; // Set default category
+                            updateTypeDropdown(categorySelect.value);
+                        }
+                        bookModal.show();
+                    });
 
-                document.getElementById('bookCategory').addEventListener('change', function() {
-                    updateTypeDropdown(this.value);
-                });
+                    // Event listener for Category change to update Type dropdown
+                    categorySelect.addEventListener('change', function() {
+                        updateTypeDropdown(this.value);
+                    });
 
-                loadBooks();
-            });
-        </script>
+                    // Event listeners for Search and Filter
+                    document.getElementById('filterCategory').addEventListener('change', applyFiltersAndSearch);
+                    document.getElementById('searchInput').addEventListener('input', applyFiltersAndSearch);
+
+                    // Form submission for Add/Edit
+                    bookForm.addEventListener('submit', async function(e) {
+                        e.preventDefault();
+
+                        const submitBtn = document.getElementById('saveBookBtn');
+                        submitBtn.disabled = true;
+                        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> جار الحفظ...';
+
+                        const formData = new FormData(bookForm);
+                        const action = formData.get('bookId') ? 'update_book' : 'add_book';
+
+                        try {
+                            const res = await fetch(`?action=${action}`, {
+                                method: 'POST',
+                                body: formData
+                            });
+                            const data = await res.json();
+
+                            if (data.success) {
+                                Swal.fire('تم الحفظ!', 'تم حفظ الكتاب بنجاح.', 'success');
+                                bookForm.reset();
+                                bookModal.hide();
+                                loadBooks(); // Reload the table
+                            } else {
+                                Swal.fire('خطأ', data.message, 'error');
+                            }
+                        } catch (error) {
+                            Swal.fire('خطأ', 'حدث خطأ في الاتصال بالخادم.', 'error');
+                        } finally {
+                            submitBtn.disabled = false;
+                            submitBtn.innerHTML = '<i class="fas fa-save"></i> حفظ';
+                        }
+                    });
+
+                    loadBooks();
+                });
+            </script>
 </body>
 
 </html>
