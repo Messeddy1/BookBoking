@@ -9,15 +9,26 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $user_id = $_SESSION['user_id'];
-// Security: Fetch user data
+// Fetch user data
 $stmt = $db->prepare("SELECT * FROM users WHERE id=?");
 $stmt->execute([$user_id]);
 $currentUser = $stmt->fetch(PDO::FETCH_ASSOC);
-
+$role = $currentUser['role'];
 if (!$currentUser) {
-    // Security: Handle case where session user_id is invalid
     header('Location: /login');
     exit;
+}
+if ($currentUser && isset($_GET['action'])) {
+    header('Content-Type: application/json');
+    $action = $_GET['action'];
+    if ($action === 'logout') {
+        session_destroy();
+        echo json_encode(['success' => true]);
+        exit;
+    } else {
+        echo json_encode(['success' => false, 'message' => 'إجراء غير صالح']);
+        exit;
+    }
 }
 
 // AJAX Update Handler
@@ -25,6 +36,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'update_profile') {
     header('Content-Type: application/json');
     $fullname = trim($_POST['fullname'] ?? '');
     $email = trim($_POST['email'] ?? '');
+    $phone = trim($_POST['phone'] ?? '');
+    $address = trim($_POST['address'] ?? '');
     $password = $_POST['password'] ?? '';
 
     if (!$fullname || !$email) {
@@ -32,13 +45,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'update_profile') {
         exit;
     }
 
-    // Input Validation: Basic email format check
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         echo json_encode(['success' => false, 'message' => 'صيغة البريد الإلكتروني غير صحيحة']);
         exit;
     }
 
-    // Check for duplicate email (if changed)
     if ($email !== $currentUser['email']) {
         $stmt = $db->prepare("SELECT COUNT(*) FROM users WHERE email=? AND id<>?");
         $stmt->execute([$email, $user_id]);
@@ -50,36 +61,34 @@ if (isset($_GET['action']) && $_GET['action'] === 'update_profile') {
 
     try {
         if ($password) {
-            // Security: Password hashing
             $hash = password_hash($password, PASSWORD_BCRYPT);
-            $stmt = $db->prepare("UPDATE users SET fullname=?, email=?, password=? WHERE id=?");
-            $res = $stmt->execute([$fullname, $email, $hash, $user_id]);
+            $stmt = $db->prepare("UPDATE users SET fullname=?, email=?, phone=?, address=?, password=? WHERE id=?");
+            $res = $stmt->execute([$fullname, $email, $phone, $address, $hash, $user_id]);
         } else {
-            $stmt = $db->prepare("UPDATE users SET fullname=?, email=? WHERE id=?");
-            $res = $stmt->execute([$fullname, $email, $user_id]);
+            $stmt = $db->prepare("UPDATE users SET fullname=?, email=?, phone=?, address=? WHERE id=?");
+            $res = $stmt->execute([$fullname, $email, $phone, $address, $user_id]);
         }
 
         if ($res) {
-            // Re-fetch updated user data for display (important for full page refresh later)
             $stmt = $db->prepare("SELECT * FROM users WHERE id=?");
             $stmt->execute([$user_id]);
             $updatedUser = $stmt->fetch(PDO::FETCH_ASSOC);
-            $_SESSION['currentUser'] = $updatedUser; // Optional: update session if needed
+            $_SESSION['currentUser'] = $updatedUser;
 
             echo json_encode([
                 'success' => true,
                 'message' => 'تم تحديث البيانات بنجاح',
-                // Send back new data for JS to update UI
                 'new_data' => [
                     'fullname' => $fullname,
-                    'email' => $email
+                    'email' => $email,
+                    'phone' => $phone,
+                    'address' => $address
                 ]
             ]);
         } else {
             echo json_encode(['success' => false, 'message' => 'حدث خطأ أثناء التحديث']);
         }
     } catch (PDOException $e) {
-        // Log the error and show a generic message to the user
         error_log("Profile update error: " . $e->getMessage());
         echo json_encode(['success' => false, 'message' => 'حدث خطأ في قاعدة البيانات.']);
     }
@@ -87,7 +96,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'update_profile') {
     exit;
 }
 
-// Ensure date is formatted correctly
 $createdAt = !empty($currentUser['created_at']) ? date('d-m-Y', strtotime($currentUser['created_at'])) : 'غير محدد';
 ?>
 
@@ -99,155 +107,191 @@ $createdAt = !empty($currentUser['created_at']) ? date('d-m-Y', strtotime($curre
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>الملف الشخصي - <?= htmlspecialchars($currentUser['fullname']) ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="../assets/bootstrap.min.css">
-    <script src="../assets/bootstrap.bundle.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
     <style>
-        :root {
-            --primary-color: #007bff;
-            --secondary-color: #6c757d;
-            --background-color: #f8f9fa;
-            --card-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.08);
-            --header-bg: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
-        }
-
         body {
-            background-color: var(--background-color);
-            padding: 20px;
+            background: #f7f9fc;
         }
 
         .profile-card {
-            max-width: 600px;
-            margin: 40px auto;
-            border: none;
-            border-radius: 12px;
-            box-shadow: var(--card-shadow);
+            max-width: 700px;
+            margin: 60px auto;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            background: #fff;
             overflow: hidden;
-            background-color: #fff;
+            transition: 0.3s;
+        }
+
+        .profile-card:hover {
+            transform: translateY(-5px);
         }
 
         .profile-header {
-            background: var(--header-bg);
+            background: linear-gradient(135deg, #007bff, #0056b3);
             color: #fff;
-            padding: 30px 20px;
             text-align: center;
+            padding: 40px 20px;
             position: relative;
         }
 
-        .profile-header i.fa-user-circle {
-            font-size: 70px;
+        .profile-header i {
+            font-size: 80px;
             margin-bottom: 10px;
         }
 
         .edit-btn-container {
             position: absolute;
-            top: 15px;
-            left: 15px;
-            /* Adjust for RTL */
+            top: 20px;
+            left: 20px;
         }
 
         .profile-body {
             padding: 30px;
         }
 
-        /* Definition List for Profile Details - Improved UX */
-        .profile-details dl {
-            display: grid;
-            grid-template-columns: 120px 1fr;
-            /* Set label width */
-            gap: 15px;
-            margin-bottom: 0;
-        }
-
         .profile-details dt {
             font-weight: 600;
-            color: var(--secondary-color);
-            grid-column: 1 / 2;
+            color: #6c757d;
         }
 
         .profile-details dd {
-            margin-bottom: 0;
-            font-size: 1.05em;
-            color: #333;
-            grid-column: 2 / 3;
+            margin-bottom: 10px;
+            color: #212529;
         }
 
         .profile-separator {
-            margin: 20px 0;
-            border-top: 1px solid #eee;
+            border-top: 1px solid #ddd;
+            margin: 15px 0;
+        }
+
+        .form-control:focus {
+            border-color: #007bff;
+            box-shadow: 0 0 5px rgba(0, 123, 255, 0.4);
+        }
+
+        .modal-content {
+            border-radius: 12px;
+        }
+
+        .btn-primary {
+            background-color: #007bff;
+            border: none;
+            transition: all 0.3s;
+        }
+
+        .btn-primary:hover {
+            background-color: #0056b3;
+            transform: scale(1.02);
         }
     </style>
 </head>
 
 <body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/"><i class="fas fa-book-open text-primary"></i> مكتبتي</a>
+            <div class="d-flex gap-2 align-items-center">
+                <?php if ($user_id) { ?>
 
-    <div class="container-fluid">
-        <nav aria-label="breadcrumb" class="mb-4 mt-4" style="max-width: 600px; margin: 0 auto;">
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="/"><i class="fas fa-home me-1"></i> الرئيسية</a></li>
-                <li class="breadcrumb-item active" aria-current="page"><i class="fas fa-user me-1"></i> الملف الشخصي</li>
-            </ol>
-        </nav>
+                    <div class="d-flex align-items-center">
+                        <span class="navbar-text">مرحبا, <strong><?php echo htmlspecialchars($role); ?></strong></span>
+                    </div>
 
-        <div class="card profile-card">
+                    <div class="dropdown">
+                        <a href="/profile" class="btn btn-outline-secondary"><i class="fas fa-user"></i> الملف الشخصي</a>
+                        <button class="btn btn-outline-danger" onclick="logout()"><i class="fas fa-sign-out-alt"></i> تسجيل الخروج</button>
+                        <a href="/me-loans" class="btn btn-outline-secondary"><i class="fas fa-book"></i> إعارتي</a>
+                    </div>
+                    <?php if ($role === 'superadmin' || $role === 'gestionnaire'): ?>
+                        <div class="dropdown">
+                            <a href="/dashboard" class="btn btn-outline-secondary"><i class="fas fa-cog"></i> إدارة</a>
+                        </div>
+                    <?php endif; ?>
+                <?php } else { ?>
+                    <div class="d-flex align-items-center">
+                        <span class="navbar-text">مرحبا, <strong>زائر</strong></span>
+                    </div>
+                    <div class="dropdown">
+                        <a href="/login" class="btn btn-outline-primary"><i class="fas fa-sign-in-alt"></i> تسجيل الدخول</a>
+                        <a href="/register" class="btn btn-outline-success"><i class="fas fa-user-plus"></i> إنشاء حساب</a>
+                    </div>
+                <?php } ?>
+            </div>
+        </div>
+    </nav>
+    <div class="container">
+        <div class="profile-card">
             <div class="profile-header">
                 <i class="fas fa-user-circle"></i>
-                <h2 class="h4 mt-2 mb-1" id="headerFullname"><?= htmlspecialchars($currentUser['fullname']) ?></h2>
-                <p class="small opacity-75 mb-0">دور المستخدم: <strong><?= htmlspecialchars($currentUser['role'] ?? 'عضو') ?></strong></p>
-
+                <h3 class="mt-2" id="headerFullname"><?= htmlspecialchars($currentUser['fullname']) ?></h3>
+                <p class="opacity-75 mb-0">دور المستخدم: <strong><?= htmlspecialchars($currentUser['role'] ?? 'عضو') ?></strong></p>
                 <div class="edit-btn-container">
-                    <button class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#editProfileModal" title="تعديل الملف">
-                        <i class="fas fa-edit"></i> <span class="d-none d-sm-inline">تعديل</span>
+                    <button class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#editProfileModal">
+                        <i class="fas fa-edit"></i> تعديل
                     </button>
                 </div>
             </div>
-
             <div class="profile-body profile-details">
-                <dl>
-                    <dt>الاسم الكامل:</dt>
-                    <dd id="displayFullname"><?= htmlspecialchars($currentUser['fullname']) ?></dd>
+                <dl class="row">
+                    <dt class="col-sm-4">الاسم الكامل:</dt>
+                    <dd class="col-sm-8" id="displayFullname"><?= htmlspecialchars($currentUser['fullname']) ?></dd>
 
-                    <dt>البريد الإلكتروني:</dt>
-                    <dd id="displayEmail"><?= htmlspecialchars($currentUser['email']) ?></dd>
+                    <dt class="col-sm-4">البريد الإلكتروني:</dt>
+                    <dd class="col-sm-8" id="displayEmail"><?= htmlspecialchars($currentUser['email']) ?></dd>
 
-                    <dt>تاريخ التسجيل:</dt>
-                    <dd><?= htmlspecialchars($createdAt) ?></dd>
+                    <dt class="col-sm-4">رقم الهاتف:</dt>
+                    <dd class="col-sm-8" id="displayPhone"><?= htmlspecialchars($currentUser['phone'] ?? 'غير محدد') ?></dd>
+
+                    <dt class="col-sm-4">العنوان:</dt>
+                    <dd class="col-sm-8" id="displayAddress"><?= htmlspecialchars($currentUser['address'] ?? 'غير محدد') ?></dd>
+
+                    <dt class="col-sm-4">تاريخ التسجيل:</dt>
+                    <dd class="col-sm-8"><?= htmlspecialchars($createdAt) ?></dd>
                 </dl>
             </div>
         </div>
     </div>
 
-    <div class="modal fade" id="editProfileModal" tabindex="-1" aria-labelledby="editProfileLabel" aria-hidden="true">
+    <!-- Edit Modal -->
+    <div class="modal fade" id="editProfileModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
                 <form id="editProfileForm">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="editProfileLabel"><i class="fas fa-edit me-2"></i> تعديل الملف الشخصي</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+                    <div class="modal-header bg-primary text-white">
+                        <h5 class="modal-title"><i class="fas fa-edit me-2"></i> تعديل الملف الشخصي</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <div id="modalMessage"></div>
 
                         <div class="mb-3">
-                            <label for="fullname" class="form-label">الاسم الكامل</label>
-                            <input type="text" class="form-control" id="fullname" name="fullname" value="<?= htmlspecialchars($currentUser['fullname']) ?>" required>
+                            <label class="form-label">الاسم الكامل</label>
+                            <input type="text" name="fullname" class="form-control" value="<?= htmlspecialchars($currentUser['fullname']) ?>" required>
                         </div>
                         <div class="mb-3">
-                            <label for="email" class="form-label">البريد الإلكتروني</label>
-                            <input type="email" class="form-control" id="email" name="email" value="<?= htmlspecialchars($currentUser['email']) ?>" required>
+                            <label class="form-label">البريد الإلكتروني</label>
+                            <input type="email" name="email" class="form-control" value="<?= htmlspecialchars($currentUser['email']) ?>" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">رقم الهاتف <small class="text-muted">(اختياري)</small></label>
+                            <input type="tel" name="phone" class="form-control" value="<?= htmlspecialchars($currentUser['phone'] ?? '') ?>" pattern="[0-9+\-\s]+" placeholder="مثل: 0600000000">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">العنوان <small class="text-muted">(اختياري)</small></label>
+                            <input type="text" name="address" class="form-control" value="<?= htmlspecialchars($currentUser['address'] ?? '') ?>" placeholder="المدينة / الشارع">
                         </div>
 
                         <hr class="profile-separator">
 
                         <div class="mb-3">
-                            <label for="password" class="form-label">كلمة المرور الجديدة</label>
-                            <input type="password" class="form-control" id="password" name="password" placeholder="اتركه فارغاً إذا لم ترغب في التغيير">
-                            <div class="form-text">لتغيير كلمة المرور، أدخل كلمة مرور جديدة هنا.</div>
+                            <label class="form-label">كلمة المرور الجديدة</label>
+                            <input type="password" name="password" class="form-control" placeholder="اتركه فارغاً إذا لم ترغب في التغيير">
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
-                        <button type="submit" class="btn btn-primary" id="saveButton"><i class="fas fa-save me-1"></i> حفظ التغييرات</button>
+                        <button type="submit" class="btn btn-primary"><i class="fas fa-save me-1"></i> حفظ</button>
                     </div>
                 </form>
             </div>
@@ -257,67 +301,66 @@ $createdAt = !empty($currentUser['created_at']) ? date('d-m-Y', strtotime($curre
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
-        document.getElementById('editProfileForm').addEventListener('submit', async function(e) {
+        document.getElementById('editProfileForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-
-            const form = this;
+            const form = e.target;
             const formData = new FormData(form);
-            const saveButton = document.getElementById('saveButton');
-            const msgDiv = document.getElementById('modalMessage');
-
-            // UI/UX: Disable button and show loading state
-            saveButton.disabled = true;
-            saveButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> جار الحفظ...';
-            msgDiv.innerHTML = ''; // Clear previous messages
+            const modalMsg = document.getElementById('modalMessage');
 
             try {
                 const res = await fetch('?action=update_profile', {
                     method: 'POST',
                     body: formData
                 });
-
                 const data = await res.json();
 
                 if (data.success) {
-                    // Update UI elements on the main page
-                    document.getElementById('headerFullname').textContent = data.new_data.fullname;
                     document.getElementById('displayFullname').textContent = data.new_data.fullname;
                     document.getElementById('displayEmail').textContent = data.new_data.email;
+                    document.getElementById('displayPhone').textContent = data.new_data.phone || 'غير محدد';
+                    document.getElementById('displayAddress').textContent = data.new_data.address || 'غير محدد';
+                    document.getElementById('headerFullname').textContent = data.new_data.fullname;
 
-                    // Clear the password field for security
-                    form.password.value = '';
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'تم الحفظ!',
+                        text: 'تم تحديث الملف الشخصي بنجاح.',
+                        timer: 1800,
+                        showConfirmButton: false
+                    });
 
-                    // Show success message inside the modal temporarily
-                    msgDiv.innerHTML = `<div class="alert alert-success mt-2">${data.message}</div>`;
-
-                    // Close the modal after a short delay
-                    setTimeout(() => {
-                        const modal = bootstrap.Modal.getInstance(document.getElementById('editProfileModal'));
-                        modal.hide();
-                        // Show SweetAlert for a nicer final confirmation
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'تم الحفظ!',
-                            text: 'تم تحديث الملف الشخصي بنجاح.',
-                            timer: 2000,
-                            timerProgressBar: true
-                        });
-                        msgDiv.innerHTML = ''; // Clear the message div after closing
-                    }, 1000);
-
+                    bootstrap.Modal.getInstance(document.getElementById('editProfileModal')).hide();
                 } else {
-                    // Show error message inside the modal
-                    msgDiv.innerHTML = `<div class="alert alert-danger mt-2">${data.message}</div>`;
+                    modalMsg.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
                 }
-            } catch (error) {
-                console.error('Fetch error:', error);
-                msgDiv.innerHTML = `<div class="alert alert-danger mt-2">حدث خطأ غير متوقع. حاول مرة أخرى.</div>`;
-            } finally {
-                // UI/UX: Restore button state
-                saveButton.disabled = false;
-                saveButton.innerHTML = '<i class="fas fa-save me-1"></i> حفظ التغييرات';
+            } catch (err) {
+                modalMsg.innerHTML = `<div class="alert alert-danger">حدث خطأ غير متوقع. حاول لاحقاً.</div>`;
+                console.error(err);
             }
         });
+
+        function logout() {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', '?action=logout', true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.success) {
+                            window.location.href = '/';
+                        } else {
+                            Swal.fire('خطأ', response.message, 'error');
+                        }
+                    } catch (e) {
+                        Swal.fire('خطأ', 'حدث خطأ غير متوقع في الاستجابة.', 'error');
+                    }
+                } else if (xhr.readyState === 4) {
+                    Swal.fire('خطأ', 'فشل في تسجيل الخروج.', 'error');
+                }
+            };
+            xhr.send();
+        }
     </script>
 </body>
 
