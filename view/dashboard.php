@@ -35,6 +35,12 @@ $Totalcategories = $db->query("SELECT COUNT(DISTINCT category_id) FROM books")->
 $categories_data = $db->query("SELECT * FROM categories")->fetchAll(PDO::FETCH_ASSOC);
 $types_all_data = $db->query("SELECT * FROM types")->fetchAll(PDO::FETCH_ASSOC);
 
+// Fetch adherents list for admin rent modal
+$adherents = [];
+if ($role === 'superadmin' || $role === 'gestionnaire') {
+    $adherents = $db->query("SELECT id, fullname, email FROM users WHERE role = 'adherent' ORDER BY fullname")->fetchAll(PDO::FETCH_ASSOC);
+}
+
 // Map categories by ID for easy lookup in JS (used for display)
 $categories_map = array_column($categories_data, 'name', 'id');
 
@@ -155,6 +161,104 @@ if (isset($_GET['action'])) {
                 echo json_encode($res ? ['success' => true] : ['success' => false, 'message' => 'حدث خطأ أثناء الحذف']);
                 exit;
 
+            case 'rent_book':
+                // Admin can create a loan for a user (or for self)
+                $book_id = intval($_POST['book_id'] ?? 0);
+                $return_date = trim($_POST['return_date'] ?? '');
+                $selected_user_id = intval($_POST['selected_user_id'] ?? 0);
+                $create_new_adherent = isset($_POST['create_new_adherent']) && $_POST['create_new_adherent'] === '1';
+
+                if (!$book_id || !$return_date) {
+                    echo json_encode(['success' => false, 'message' => 'بيانات غير كاملة']);
+                    exit;
+                }
+
+                // validate return_date
+                $d = DateTime::createFromFormat('Y-m-d', $return_date);
+                if (!$d) {
+                    echo json_encode(['success' => false, 'message' => 'تاريخ إرجاع غير صالح']);
+                    exit;
+                }
+
+                // determine user id for the loan
+                $user_for_loan = $user['id']; // default to current admin if nothing else
+
+                if ($selected_user_id) {
+                    $stmtU = $db->prepare("SELECT id FROM users WHERE id=?");
+                    $stmtU->execute([$selected_user_id]);
+                    if ($stmtU->fetch(PDO::FETCH_ASSOC)) {
+                        $user_for_loan = $selected_user_id;
+                    } else {
+                        echo json_encode(['success' => false, 'message' => 'المستخدم المحدد غير موجود']);
+                        exit;
+                    }
+                }
+
+                if ($create_new_adherent) {
+                    $new_fullname = trim($_POST['new_fullname'] ?? '');
+                    $new_email = trim($_POST['new_email'] ?? '');
+                    $phone = trim($_POST['phone'] ?? '');
+                    $address = trim($_POST['address'] ?? '');
+
+                    if (!$new_fullname || !$new_email) {
+                        echo json_encode(['success' => false, 'message' => 'مطلوب اسم وبريد المستعير الجديد']);
+                        exit;
+                    }
+
+                    if (!filter_var($new_email, FILTER_VALIDATE_EMAIL)) {
+                        echo json_encode(['success' => false, 'message' => 'بريد إلكتروني غير صالح']);
+                        exit;
+                    }
+
+                    $stmtCheck = $db->prepare("SELECT COUNT(*) FROM users WHERE email = ?");
+                    $stmtCheck->execute([$new_email]);
+                    if ($stmtCheck->fetchColumn() > 0) {
+                        echo json_encode(['success' => false, 'message' => 'البريد الإلكتروني مستخدم بالفعل']);
+                        exit;
+                    }
+
+                    $temp_pass_hash = password_hash('password', PASSWORD_DEFAULT);
+                    $stmtIns = $db->prepare("INSERT INTO users (fullname, email, password, role, address, phone) VALUES (?, ?, ?, 'adherent', ?, ?)");
+                    $resIns = $stmtIns->execute([$new_fullname, $new_email, $temp_pass_hash, $address, $phone]);
+                    if ($resIns) {
+                        $user_for_loan = $db->lastInsertId();
+                        $new_pass = 'password' . $user_for_loan;
+                        $stmtUpd = $db->prepare("UPDATE users SET password = ? WHERE id = ?");
+                        $stmtUpd->execute([password_hash($new_pass, PASSWORD_DEFAULT), $user_for_loan]);
+                    } else {
+                        echo json_encode(['success' => false, 'message' => 'فشل في إنشاء مستعير جديد']);
+                        exit;
+                    }
+                }
+
+                // check book exists and is available
+                $stmtB = $db->prepare("SELECT b.*,
+                    (SELECT COUNT(*) FROM loans l WHERE l.book_id = b.id AND l.return_date IS NULL) AS active_loans
+                    FROM books b WHERE b.id = ?");
+                $stmtB->execute([$book_id]);
+                $bookRow = $stmtB->fetch(PDO::FETCH_ASSOC);
+                if (!$bookRow) {
+                    echo json_encode(['success' => false, 'message' => 'الكتاب غير موجود']);
+                    exit;
+                }
+                if (intval($bookRow['active_loans']) > 0) {
+                    echo json_encode(['success' => false, 'message' => 'الكتاب معار حاليا']);
+                    exit;
+                }
+
+                $loan_date = (new DateTime('today'))->format('Y-m-d');
+                $due_date = (new DateTime($return_date))->modify('-1 day')->format('Y-m-d');
+
+                $ins = $db->prepare("INSERT INTO loans (book_id, user_id, loan_date, due_date, return_date) VALUES (?, ?, ?, ?, ?)");
+                $ok = $ins->execute([$book_id, $user_for_loan, $loan_date, $due_date, $return_date]);
+
+                if ($ok) {
+                    echo json_encode(['success' => true, 'message' => 'تم إنشاء الإعارة بنجاح']);
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'فشل عند إنشاء الإعارة']);
+                }
+                exit;
+
             case 'logout':
                 session_destroy();
                 echo json_encode(['success' => true]);
@@ -181,6 +285,8 @@ if (isset($_GET['action'])) {
     <title>لوحة التحكم - المكتبة</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="../assets/bootstrap.min.css">
+    <script src="../assets/bootstrap.bundle.min.js"></script>
     <style>
         body {
             font-family: 'Cairo', sans-serif;
@@ -416,7 +522,7 @@ if (isset($_GET['action'])) {
                                     <hr>
                                     <div class="row g-3 details-list">
                                         <div class="col-md-6"><small class="text-secondary">المعرّف المخصص:</small><br><strong id="detailCustomId"></strong></div>
-                                        <div class="col-md-6"><small class="text-secondary">رقم قاعدة البيانات (ID):</small><br><strong id="detailId"></strong></div>
+                                        <!-- <div class="col-md-6"><small class="text-secondary">رقم قاعدة البيانات (ID):</small><br><strong id="detailId"></strong></div> -->
                                         <div class="col-md-6"><small class="text-secondary">الصنف:</small><br><strong id="detailCategory"></strong></div>
                                         <div class="col-md-6"><small class="text-secondary">النوع:</small><br><strong id="detailType"></strong></div>
                                         <div class="col-12"><small class="text-secondary">الحالة:</small><br><span id="detailStatus" class="badge"></span></div>
@@ -443,14 +549,77 @@ if (isset($_GET['action'])) {
 
             <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
             <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+            <!-- Rent Modal (admin) -->
+            <div class="modal fade" id="rentModal" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header bg-success text-white">
+                            <h5 class="modal-title"><i class="fas fa-book me-2"></i> إعارة كتاب</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="rentForm">
+                                <input type="hidden" name="book_id" id="rent_book_id">
+                                <div class="mb-3 d-flex gap-3 align-items-center">
+                                    <div style="width:90px;">
+                                        <div id="rentCover" class="modal-cover" style="background-image:url('https://via.placeholder.com/120x170?text=No+Image')"></div>
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <h6 id="rentBookTitle"></h6>
+                                        <small id="rentBookAuthor" class="small-note"></small>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">إعارة إلى (المستعير)</label>
+                                    <select class="form-select" id="selectedUserId" name="selected_user_id">
+                                        <option value="">-- اختر مستعيراً موجوداً --</option>
+                                    </select>
+                                </div>
+
+                                <div class="mb-3 form-check">
+                                    <input class="form-check-input" type="checkbox" id="createNewAdherent" name="create_new_adherent" value="1">
+                                    <label class="form-check-label" for="createNewAdherent">إنشاء مستعير جديد</label>
+                                </div>
+
+                                <div id="newAdherentFields" style="display:none">
+                                    <div class="mb-2"><label>الاسم الكامل</label><input type="text" class="form-control" name="new_fullname" id="new_fullname"></div>
+                                    <div class="mb-2"><label>البريد الإلكتروني</label><input type="email" class="form-control" name="new_email" id="new_email"></div>
+                                    <div class="mb-2"><label>الهاتف</label><input type="text" class="form-control" name="phone" id="new_phone"></div>
+                                    <div class="mb-2"><label>العنوان</label><input type="text" class="form-control" name="address" id="new_address"></div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">تاريخ الإرجاع</label>
+                                    <input type="date" class="form-control" name="return_date" id="rent_return_date" required>
+                                </div>
+
+                                <div class="text-end">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
+                                    <button type="submit" class="btn btn-success" id="submitRentBtn">تأكيد الإعارة</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <script>
                 // PHP Variables mapped to JS
                 const CATEGORIES = <?php echo json_encode($categories_map); ?>;
                 const BOOK_TYPES_BY_CATEGORY = <?php echo json_encode($bookTypes_by_category); ?>;
+                // Adherents list for admin rent modal
+                const ADHERENTS = <?php echo json_encode($adherents); ?>;
 
                 // Global store for books to enable fast filtering/editing
                 let allBooks = [];
                 let bookDetailsModalInstance;
+
+                // Small helper to escape strings used inside onclick attributes
+                function addslashes(str) {
+                    if (str === null || str === undefined) return '';
+                    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\"/g, '\\\"');
+                }
 
                 function logout() {
                     // Simplified POST request for logout
@@ -509,11 +678,12 @@ if (isset($_GET['action'])) {
                         <td>${book.title}</td>
                         <td>${book.author}</td>
                         <td>${book.category_name || 'غير معروف'}</td>
-                        <td>${statusBadge}</td>
+                            <td>${statusBadge}</td>
                         <td>
                             <button class="btn btn-sm btn-primary me-1" onclick="viewBookDetails(${book.id})" title="عرض التفاصيل"><i class="fas fa-eye"></i></button>
                             <button class="btn btn-sm btn-info text-white me-1" onclick="editBook(${book.id})" title="تعديل"><i class="fas fa-edit"></i></button>
-                            <button class="btn btn-sm btn-danger" onclick="deleteBook(${book.id})" title="حذف"><i class="fas fa-trash-alt"></i></button>
+                            <button class="btn btn-sm btn-danger me-1" onclick="deleteBook(${book.id})" title="حذف"><i class="fas fa-trash-alt"></i></button>
+                            <button class="btn btn-sm btn-success" onclick="openRentModal(${book.id}, ${book.active_loans || 0}, '${book.cover_image ? addslashes(book.cover_image) : 'https://via.placeholder.com/50x70?text=No+Image'}', '${addslashes(book.title)}', '${addslashes(book.author || '')}')" title="إعارة"><i class="fas fa-book"></i></button>
                         </td>
                     `;
                         booksTableBody.appendChild(tr);
@@ -572,7 +742,7 @@ if (isset($_GET['action'])) {
                     document.getElementById('detailTitle').textContent = book.title;
                     document.getElementById('detailAuthor').textContent = book.author || 'غير محدد';
                     document.getElementById('detailCustomId').textContent = book.custom_id;
-                    document.getElementById('detailId').textContent = book.id;
+                    // document.getElementById('detailId').textContent = book.id;
                     document.getElementById('detailCategory').textContent = book.category_name || 'غير معروف';
                     document.getElementById('detailType').textContent = book.type_name || 'غير معروف';
                     document.getElementById('detailNotes').textContent = book.notes || 'لا يوجد ملاحظات.';
@@ -720,7 +890,74 @@ if (isset($_GET['action'])) {
                     });
 
                     loadBooks();
+                    // Populate adherents select for rent modal
+                    const sel = document.getElementById('selectedUserId');
+                    if (sel && ADHERENTS && ADHERENTS.length) {
+                        ADHERENTS.forEach(a => {
+                            const opt = document.createElement('option');
+                            opt.value = a.id;
+                            opt.textContent = a.fullname + ' <' + (a.email || '') + '>';
+                            sel.appendChild(opt);
+                        });
+                    }
+
+                    // New adherent checkbox toggle
+                    document.getElementById('createNewAdherent').addEventListener('change', function() {
+                        document.getElementById('newAdherentFields').style.display = this.checked ? 'block' : 'none';
+                        // disable select when creating new adherent
+                        document.getElementById('selectedUserId').disabled = this.checked;
+                    });
+
+                    // Rent form submission via AJAX
+                    document.getElementById('rentForm').addEventListener('submit', async function(e) {
+                        e.preventDefault();
+                        const btn = document.getElementById('submitRentBtn');
+                        btn.disabled = true;
+                        btn.textContent = 'جارٍ الإعارة...';
+
+                        const form = new FormData(this);
+
+                        try {
+                            const res = await fetch('?action=rent_book', {
+                                method: 'POST',
+                                body: form
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                                Swal.fire('نجاح', data.message || 'تم إنشاء الإعارة', 'success');
+                                const rentModal = bootstrap.Modal.getInstance(document.getElementById('rentModal'));
+                                rentModal.hide();
+                                loadBooks();
+                            } else {
+                                Swal.fire('خطأ', data.message || 'حدث خطأ', 'error');
+                            }
+                        } catch (err) {
+                            Swal.fire('خطأ', 'فشل الاتصال بالخادم.', 'error');
+                        } finally {
+                            btn.disabled = false;
+                            btn.textContent = 'تأكيد الإعارة';
+                        }
+                    });
                 });
+
+                // Open Rent Modal helper
+                window.openRentModal = function(bookId, activeLoans, cover, title, author) {
+                    if (activeLoans && parseInt(activeLoans) > 0) {
+                        Swal.fire('تنبيه', 'هذا الكتاب معار حالياً ولا يمكن إعارته.', 'warning');
+                        return;
+                    }
+
+                    document.getElementById('rent_book_id').value = bookId;
+                    document.getElementById('rentCover').style.backgroundImage = `url('${cover}')`;
+                    document.getElementById('rentBookTitle').textContent = title || 'عنوان غير معروف';
+                    document.getElementById('rentBookAuthor').textContent = author || '';
+                    document.getElementById('rent_return_date').value = '';
+                    document.getElementById('createNewAdherent').checked = false;
+                    document.getElementById('newAdherentFields').style.display = 'none';
+                    document.getElementById('selectedUserId').disabled = false;
+                    const rentModal = new bootstrap.Modal(document.getElementById('rentModal'));
+                    rentModal.show();
+                }
             </script>
 </body>
 

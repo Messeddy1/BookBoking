@@ -13,15 +13,12 @@ switch ($path) {
     case '':
         include 'view/home.php';
         break;
-
     case '/dashboard':
         include 'view/dashboard.php';
         break;
-
     case '/login':
         include 'view/login.php';
         break;
-
     case '/register':
         include 'view/register.php';
         break;

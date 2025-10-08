@@ -157,6 +157,8 @@ $categories = $db->query("SELECT * FROM categories")->fetchAll(PDO::FETCH_ASSOC)
     <title>إدارة الأصناف والأنواع</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="../assets/bootstrap.min.css">
+    <script src="../assets/bootstrap.bundle.min.js"></script>
     <style>
         body {
             font-family: 'Cairo', sans-serif;

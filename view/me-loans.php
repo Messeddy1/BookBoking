@@ -23,6 +23,18 @@ if (!$user) {
 }
 
 $role = $user['role'];
+if ($user && isset($_GET['action'])) {
+    header('Content-Type: application/json');
+    $action = $_GET['action'];
+    if ($action === 'logout') {
+        session_destroy();
+        echo json_encode(['success' => true]);
+        exit;
+    } else {
+        echo json_encode(['success' => false, 'message' => 'إجراء غير صالح']);
+        exit;
+    }
+}
 
 // جلب جميع الإعارات الخاصة بالمستخدم وتضمين due_date (الذي يمثل تاريخ الإرجاع الفعلي/المتوقع)
 // ملاحظة: افترضت أن لديك عمود "due_date" أو "return_date" يمثل التاريخ المتوقع للإرجاع.
@@ -57,6 +69,8 @@ $today = new DateTime('today');
     <title>إعاراتي - مكتبتي</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="../assets/bootstrap.min.css">
+    <script src="../assets/bootstrap.bundle.min.js"></script>
     <style>
         body {
             background: #f7f9fc;
@@ -148,7 +162,6 @@ $today = new DateTime('today');
                         $status_text = 'تم الإرجاع';
                         $icon_class = 'fa-check';
                         $card_border = 'border-success';
-                     
                     } else {
                         $badge_class = 'bg-info';
                         $status_text = 'قيد الانتظار';
@@ -204,21 +217,26 @@ $today = new DateTime('today');
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
         function logout() {
-            Swal.fire({
-                title: 'هل أنت متأكد؟',
-                text: "سيتم تسجيل خروجك من النظام.",
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonColor: '#d33',
-                cancelButtonColor: '#3085d6',
-                confirmButtonText: 'نعم، تسجيل الخروج',
-                cancelButtonText: 'إلغاء'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    // يمكنك استخدام Ajax أو إعادة توجيه بسيط
-                    window.location.href = '/logout'; // افترضنا أن لديك مسار /logout يعالج الجلسة
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', '?action=logout', true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.success) {
+                            window.location.href = '/';
+                        } else {
+                            Swal.fire('خطأ', response.message, 'error');
+                        }
+                    } catch (e) {
+                        Swal.fire('خطأ', 'حدث خطأ غير متوقع في الاستجابة.', 'error');
+                    }
+                } else if (xhr.readyState === 4) {
+                    Swal.fire('خطأ', 'فشل في تسجيل الخروج.', 'error');
                 }
-            })
+            };
+            xhr.send();
         }
     </script>
 </body>

@@ -1,11 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - Book Booking</title>
+    <title>إنشاء حساب - حجز الكتب</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/bootstrap.min.css">
+    <script src="../assets/bootstrap.bundle.min.js"></script>
     <style>
         body {
             background: #f8f9fa;
@@ -18,6 +20,7 @@
             background: #fff;
             border-radius: 10px;
             box-shadow: 0 0 10px #ccc;
+            direction: rtl;
         }
 
         .error-text {
@@ -29,34 +32,52 @@
 
 <body>
     <div class="register-box">
-        <h2 class="mb-4 text-center">Create Account</h2>
+        <h2 class="mb-4 text-center">إنشاء حساب جديد</h2>
         <form id="registerForm" method="POST" action="/controllers/register.php">
             <div class="mb-3">
-                <label for="fullname" class="form-label">Full Name</label>
+                <label for="fullname" class="form-label">الاسم الكامل</label>
                 <input type="text" class="form-control" id="fullname" name="fullname" required>
                 <div id="fullnameError" class="error-text"></div>
             </div>
+
             <div class="mb-3">
-                <label for="email" class="form-label">Email</label>
+                <label for="email" class="form-label">البريد الإلكتروني</label>
                 <input type="email" class="form-control" id="email" name="email" required>
                 <div id="emailError" class="error-text"></div>
             </div>
+
             <div class="mb-3">
-                <label for="password" class="form-label">Password</label>
+                <label for="phone" class="form-label">رقم الهاتف</label>
+                <input type="tel" class="form-control" id="phone" name="phone" required placeholder="مثال: 0612345678">
+                <div id="phoneError" class="error-text"></div>
+            </div>
+
+            <div class="mb-3">
+                <label for="address" class="form-label">العنوان</label>
+                <input type="text" class="form-control" id="address" name="address" required placeholder="مثال: الدار البيضاء، المغرب">
+                <div id="addressError" class="error-text"></div>
+            </div>
+
+            <div class="mb-3">
+                <label for="password" class="form-label">كلمة المرور</label>
                 <input type="password" class="form-control" id="password" name="password" required>
                 <div id="passwordError" class="error-text"></div>
             </div>
+
             <div class="mb-3">
-                <label for="confirm_password" class="form-label">Confirm Password</label>
+                <label for="confirm_password" class="form-label">تأكيد كلمة المرور</label>
                 <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
                 <div id="confirmPasswordError" class="error-text"></div>
             </div>
-            <button type="submit" class="btn btn-primary w-100">Register</button>
+
+            <button type="submit" class="btn btn-primary w-100">تسجيل</button>
         </form>
+
         <div class="mt-3 text-center">
-            <a href="/login">Already have an account? Login</a>
+            <a href="/login">هل لديك حساب؟ تسجيل الدخول</a>
         </div>
     </div>
+
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
         document.getElementById('registerForm').addEventListener('submit', function(e) {
@@ -64,19 +85,23 @@
 
             let isValid = true;
 
-            // Reset error messages
+            // مسح الأخطاء السابقة
             document.getElementById('fullnameError').innerText = '';
             document.getElementById('emailError').innerText = '';
+            document.getElementById('phoneError').innerText = '';
+            document.getElementById('addressError').innerText = '';
             document.getElementById('passwordError').innerText = '';
             document.getElementById('confirmPasswordError').innerText = '';
 
-            // Get form values
+            // الحصول على القيم من الحقول
             const fullname = document.getElementById('fullname').value.trim();
             const email = document.getElementById('email').value.trim();
+            const phone = document.getElementById('phone').value.trim();
+            const address = document.getElementById('address').value.trim();
             const password = document.getElementById('password').value;
             const confirmPassword = document.getElementById('confirm_password').value;
 
-            // Front-end validation (Inline Errors)
+            // التحقق من صحة البيانات
             if (fullname === '') {
                 document.getElementById('fullnameError').innerText = 'الاسم الكامل مطلوب.';
                 isValid = false;
@@ -85,6 +110,17 @@
             const emailPattern = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/;
             if (!emailPattern.test(email)) {
                 document.getElementById('emailError').innerText = 'الرجاء إدخال بريد إلكتروني صالح.';
+                isValid = false;
+            }
+
+            const phonePattern = /^0[5-7]\d{8}$/;
+            if (!phonePattern.test(phone)) {
+                document.getElementById('phoneError').innerText = 'الرجاء إدخال رقم هاتف مغربي صالح (مثال: 0612345678).';
+                isValid = false;
+            }
+
+            if (address === '') {
+                document.getElementById('addressError').innerText = 'العنوان مطلوب.';
                 isValid = false;
             }
 
@@ -107,6 +143,8 @@
                         body: JSON.stringify({
                             fullname: fullname,
                             email: email,
+                            phone: phone,
+                            address: address,
                             password: password,
                             confirm_password: confirmPassword
                         })
@@ -124,20 +162,13 @@
                                 window.location.href = '/';
                             }, 1500);
                         } else {
-                            // ✅ السيرفر سيرجع أخطاء معينة لـ كل فيلد
                             if (data.errors) {
-                                if (data.errors.fullname) {
-                                    document.getElementById('fullnameError').innerText = data.errors.fullname;
-                                }
-                                if (data.errors.email) {
-                                    document.getElementById('emailError').innerText = data.errors.email;
-                                }
-                                if (data.errors.password) {
-                                    document.getElementById('passwordError').innerText = data.errors.password;
-                                }
-                                if (data.errors.confirm_password) {
-                                    document.getElementById('confirmPasswordError').innerText = data.errors.confirm_password;
-                                }
+                                if (data.errors.fullname) document.getElementById('fullnameError').innerText = data.errors.fullname;
+                                if (data.errors.email) document.getElementById('emailError').innerText = data.errors.email;
+                                if (data.errors.phone) document.getElementById('phoneError').innerText = data.errors.phone;
+                                if (data.errors.address) document.getElementById('addressError').innerText = data.errors.address;
+                                if (data.errors.password) document.getElementById('passwordError').innerText = data.errors.password;
+                                if (data.errors.confirm_password) document.getElementById('confirmPasswordError').innerText = data.errors.confirm_password;
                             }
                         }
                     })

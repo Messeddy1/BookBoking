@@ -2,7 +2,7 @@
 session_start();
 require_once('./db_config.php');
 
-// تأكد من صلاحية المستخدم
+// تحقق من صلاحية المستخدم
 if (!isset($_SESSION['user_id'])) {
     header('Location: /login');
     exit;
@@ -31,13 +31,13 @@ if (isset($_GET['action'])) {
 
     switch ($action) {
         case 'get_users':
-            $stmt = $db->query("SELECT id, fullname, email, role FROM users ORDER BY id DESC");
+            $stmt = $db->query("SELECT id, fullname, email, role, phone, address FROM users ORDER BY id DESC");
             echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
             exit;
 
         case 'get_user_details':
             $id = intval($_GET['id']);
-            $stmt = $db->prepare("SELECT id, fullname, email, role FROM users WHERE id=?");
+            $stmt = $db->prepare("SELECT id, fullname, email, role, phone, address FROM users WHERE id=?");
             $stmt->execute([$id]);
             echo json_encode($stmt->fetch(PDO::FETCH_ASSOC));
             exit;
@@ -49,9 +49,16 @@ if (isset($_GET['action'])) {
             $email = trim($_POST['email'] ?? '');
             $password = $_POST['password'] ?? '';
             $userRole = $_POST['role'] ?? 'adherent';
+            $phone_number = $_POST['phone'] ?? null; // اختياري
+            $address = trim($_POST['address'] ?? ''); // اختياري
 
             if (!$fullname || !$email) {
-                echo json_encode(['success' => false, 'message' => 'الرجاء ملء جميع الحقول الضرورية']);
+                echo json_encode(['success' => false, 'message' => 'الرجاء ملء الاسم والبريد الإلكتروني']);
+                exit;
+            }
+
+            if ($phone_number && !ctype_digit($phone_number)) {
+                echo json_encode(['success' => false, 'message' => "رقم الهاتف يجب أن يحتوي على أرقام فقط."]);
                 exit;
             }
 
@@ -60,24 +67,24 @@ if (isset($_GET['action'])) {
                     echo json_encode(['success' => false, 'message' => 'الرجاء إدخال كلمة المرور']);
                     exit;
                 }
-                if ($stmt = $db->prepare("SELECT COUNT(*) FROM users WHERE email=?")) {
-                    $stmt->execute([$email]);
-                    if ($stmt->fetchColumn() > 0) {
-                        echo json_encode(['success' => false, 'message' => 'البريد الإلكتروني مستخدم بالفعل']);
-                        exit;
-                    }
+                $stmt = $db->prepare("SELECT COUNT(*) FROM users WHERE email=?");
+                $stmt->execute([$email]);
+                if ($stmt->fetchColumn() > 0) {
+                    echo json_encode(['success' => false, 'message' => 'البريد الإلكتروني مستخدم بالفعل']);
+                    exit;
                 }
+
                 $hash = password_hash($password, PASSWORD_BCRYPT);
-                $stmt = $db->prepare("INSERT INTO users (fullname, email, password, role) VALUES (?,?,?,?)");
-                $res = $stmt->execute([$fullname, $email, $hash, $userRole]);
+                $stmt = $db->prepare("INSERT INTO users (fullname, email, password, role, phone, address) VALUES (?,?,?,?,?,?)");
+                $res = $stmt->execute([$fullname, $email, $hash, $userRole, $phone_number, $address]);
             } else {
                 if ($password) {
                     $hash = password_hash($password, PASSWORD_BCRYPT);
-                    $stmt = $db->prepare("UPDATE users SET fullname=?, email=?, password=?, role=? WHERE id=?");
-                    $res = $stmt->execute([$fullname, $email, $hash, $userRole, $id]);
+                    $stmt = $db->prepare("UPDATE users SET fullname=?, email=?, password=?, role=?, phone=?, address=? WHERE id=?");
+                    $res = $stmt->execute([$fullname, $email, $hash, $userRole, $phone_number, $address, $id]);
                 } else {
-                    $stmt = $db->prepare("UPDATE users SET fullname=?, email=?, role=? WHERE id=?");
-                    $res = $stmt->execute([$fullname, $email, $userRole, $id]);
+                    $stmt = $db->prepare("UPDATE users SET fullname=?, email=?, role=?, phone=?, address=? WHERE id=?");
+                    $res = $stmt->execute([$fullname, $email, $userRole, $phone_number, $address, $id]);
                 }
             }
 
@@ -111,28 +118,28 @@ if (isset($_GET['action'])) {
 
 <head>
     <meta charset="UTF-8">
-    <title>إدارة المستخدمين</title>
+    <title>إدارة المنخرطين والأعضاء</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/bootstrap.min.css">
+    <script src="../assets/bootstrap.bundle.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 
 <body>
     <?php include("./includes/navbarDashboard.php"); ?>
     <div class="container mt-4">
-        <h2 class="mb-4">إدارة المستخدمين</h2>
+        <h2 class="mb-4">إدارة المنخرطين والأعضاء</h2>
         <div class="card shadow-sm border-0">
             <div class="card-header bg-light d-flex flex-wrap justify-content-between align-items-center">
-                <h5 class="mb-3">قائمة المستخدمين</h5>
+                <h5 class="mb-3">قائمة المنخرطين والأعضاء</h5>
 
                 <div class="d-flex flex-wrap gap-2 w-100 align-items-center">
-                    <button class="btn btn-primary" id="addUserBtn"><i class="fas fa-plus"></i> إضافة مستخدم جديد</button>
-
+                    <button class="btn btn-primary" id="addUserBtn"><i class="fas fa-plus"></i> إضافة منخرط/عضو جديد</button>
                     <div class="d-flex flex-grow-1 align-items-center gap-2">
                         <div class="input-group flex-grow-1">
                             <span class="input-group-text"><i class="fas fa-search"></i></span>
                             <input type="text" class="form-control" id="searchInput" placeholder="بحث بالاسم أو البريد...">
                         </div>
-
                         <select class="form-select w-auto" id="filterRole">
                             <option value="">كل الأدوار</option>
                             <option value="superadmin">Superadmin</option>
@@ -148,16 +155,18 @@ if (isset($_GET['action'])) {
                     <table class="table table-striped table-hover align-middle">
                         <thead class="table-light">
                             <tr>
-                                <th scope="col">#</th>
-                                <th scope="col">الاسم الكامل</th>
-                                <th scope="col">البريد الإلكتروني</th>
-                                <th scope="col">الدور</th>
-                                <th scope="col">إجراءات</th>
+                                <th>#</th>
+                                <th>الاسم الكامل</th>
+                                <th>البريد الإلكتروني</th>
+                                <th>رقم الهاتف</th>
+                                <th>العنوان</th>
+                                <th>الدور</th>
+                                <th>إجراءات</th>
                             </tr>
                         </thead>
                         <tbody id="usersTableBody">
                             <tr>
-                                <td colspan="5" class="text-center p-5">
+                                <td colspan="7" class="text-center p-5">
                                     <div class="spinner-border text-primary"></div>
                                 </td>
                             </tr>
@@ -174,13 +183,24 @@ if (isset($_GET['action'])) {
             <div class="modal-content">
                 <form id="userForm">
                     <div class="modal-header bg-primary text-white">
-                        <h5 class="modal-title" id="userModalLabel">إضافة مستخدم</h5>
+                        <h5 class="modal-title" id="userModalLabel">إضافة المنخرطين أوالأعضاء</h5>
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <input type="hidden" id="userId" name="userId">
                         <div class="mb-3"><label>الاسم الكامل</label><input type="text" class="form-control" name="fullname" id="fullname" required></div>
                         <div class="mb-3"><label>البريد الإلكتروني</label><input type="email" class="form-control" name="email" id="email" required></div>
+
+                        <div class="mb-2">
+                            <label for="phone" class="form-label small">رقم الهاتف (اختياري)</label>
+                            <input type="text" name="phone" id="phone" class="form-control form-control-sm" placeholder="مثال: 0612345678">
+                        </div>
+
+                        <div class="mb-2">
+                            <label for="address" class="form-label small">العنوان (اختياري)</label>
+                            <input type="text" name="address" id="address" class="form-control form-control-sm" placeholder="مثال: الدار البيضاء، المغرب">
+                        </div>
+
                         <div class="mb-3"><label>كلمة المرور</label><input type="password" class="form-control" name="password" id="password"></div>
                         <div class="mb-3"><label>الدور</label>
                             <select class="form-select" name="role" id="role">
@@ -216,22 +236,24 @@ if (isset($_GET['action'])) {
 
             function renderUsers(list) {
                 if (!list.length) {
-                    usersTableBody.innerHTML = '<tr><td colspan="5" class="text-center">لا يوجد مستخدمين</td></tr>';
+                    usersTableBody.innerHTML = '<tr><td colspan="7" class="text-center">لا يوجد مستخدمين</td></tr>';
                     return;
                 }
                 usersTableBody.innerHTML = '';
                 list.forEach(u => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
-                <td>${u.id}</td>
-                <td>${u.fullname}</td>
-                <td>${u.email}</td>
-                <td><span class="badge bg-${u.role==='superadmin'?'danger':u.role==='gestionnaire'?'warning text-dark':'secondary'}">${u.role}</span></td>
-                <td>
-                    <button class="btn btn-sm btn-info text-white me-1" onclick="editUser(${u.id})"><i class="fas fa-edit"></i></button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})"><i class="fas fa-trash-alt"></i></button>
-                </td>
-            `;
+                        <td>${u.id}</td>
+                        <td>${u.fullname}</td>
+                        <td>${u.email}</td>
+                        <td>${u.phone || '-'}</td>
+                        <td>${u.address || '-'}</td>
+                        <td><span class="badge bg-${u.role==='superadmin'?'danger':u.role==='gestionnaire'?'warning text-dark':'secondary'}">${u.role}</span></td>
+                        <td>
+                            <button class="btn btn-sm btn-info text-white me-1" onclick="editUser(${u.id})"><i class="fas fa-edit"></i></button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})"><i class="fas fa-trash-alt"></i></button>
+                        </td>
+                    `;
                     usersTableBody.appendChild(tr);
                 });
             }
@@ -242,6 +264,8 @@ if (isset($_GET['action'])) {
                 document.getElementById('userId').value = u.id;
                 document.getElementById('fullname').value = u.fullname;
                 document.getElementById('email').value = u.email;
+                document.getElementById('phone').value = u.phone || '';
+                document.getElementById('address').value = u.address || '';
                 document.getElementById('password').value = '';
                 document.getElementById('role').value = u.role;
                 document.getElementById('userModalLabel').textContent = 'تعديل مستخدم';
@@ -249,7 +273,6 @@ if (isset($_GET['action'])) {
             }
 
             window.deleteUser = async function(id) {
-                // sweetalert confirm
                 const result = await Swal.fire({
                     title: 'هل أنت متأكد؟',
                     text: "لن تتمكن من التراجع عن هذا الإجراء!",
@@ -271,11 +294,10 @@ if (isset($_GET['action'])) {
                 if (data.success) {
                     Swal.fire('تم الحذف!', 'تم حذف المستخدم بنجاح.', 'success');
                     loadUsers()
-                }else Swal.fire({
+                } else Swal.fire({
                     title: 'خطأ',
                     text: data.message,
                     icon: 'error'
-                    
                 });
             }
 
@@ -289,7 +311,6 @@ if (isset($_GET['action'])) {
                 });
                 const data = await res.json();
                 if (data.success) {
-                    // sweetalert success
                     Swal.fire('تم الحفظ!', 'تم حفظ المستخدم بنجاح.', 'success');
                     userForm.reset();
                     userModal.hide();
@@ -304,7 +325,6 @@ if (isset($_GET['action'])) {
                 userModal.show();
             });
 
-            // فلترة وبحث
             document.getElementById('filterRole').addEventListener('change', function() {
                 let role = this.value;
                 let filtered = role ? users.filter(u => u.role === role) : users;

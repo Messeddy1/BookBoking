@@ -74,9 +74,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             // $new_fullname = trim($_POST['new_fullname'] ?? '');
             $new_fullname = trim($_POST['new_fullname'] ?? '');
             $new_email = trim($_POST['new_email'] ?? '');
-
+            $phone_number = $_POST['phone'];
+            $address = trim($_POST['address']);
             if (empty($new_fullname) || empty($new_email)) {
                 $_SESSION['flash'] = "يجب إدخال جميع بيانات المستعير الجديد.";
+                header("Location: " . $_SERVER['REQUEST_URI']);
+                exit;
+            }
+            if (!$phone_number || !ctype_digit($phone_number)) {
+                $_SESSION['flash'] = "رقم الهاتف يجب أن يحتوي على أرقام فقط.";
                 header("Location: " . $_SERVER['REQUEST_URI']);
                 exit;
             }
@@ -99,9 +105,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $temp_password_hash = password_hash('password', PASSWORD_DEFAULT);
             $default_role = 'adherent';
 
-            $stmtInsert = $db->prepare("INSERT INTO users (fullname, email, password, role) VALUES (?, ?, ?, ?)");
+            $stmtInsert = $db->prepare("INSERT INTO users (fullname, email, password, role,address,phone) VALUES (?, ?, ?, ?,?,?)");
 
-            if ($stmtInsert->execute([$new_fullname, $new_email, $temp_password_hash, $default_role])) {
+            if ($stmtInsert->execute([$new_fullname, $new_email, $temp_password_hash, $default_role, $address, $phone_number])) {
                 $user_id_for_loan = $db->lastInsertId();
 
                 if ($user_id_for_loan) {
@@ -278,6 +284,8 @@ function cover_url($book)
     <title>المكتبة - عرض الكتب</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="../assets/bootstrap.min.css">
+    <script src="../assets/bootstrap.bundle.min.js"></script>
     <style>
         body {
             background: #f7f9fc;
@@ -545,11 +553,7 @@ function cover_url($book)
                                         <h6 class="card-title text-primary"><i class="fas fa-user-plus"></i> مستعير جديد</h6>
                                         <input type="hidden" name="create_new_adherent" id="create_new_adherent_flag" value="0">
 
-                                        <!-- <div class="mb-2">
-                                            <label for="new_fullname" class="form-label small">اسم المستخدم</label>
-                                            <input type="text" name="new_fullname" id="new_fullname" class="form-control form-control-sm" placeholder="مثل: ahmed.l">
-                                            <div class="invalid-feedback">مطلوب.</div>
-                                        </div> -->
+
                                         <div class="mb-2">
                                             <label for="new_fullname" class="form-label small">الاسم الكامل</label>
                                             <input type="text" name="new_fullname" id="new_fullname" class="form-control form-control-sm" placeholder="مثل: أحمد العزاوي">
@@ -560,7 +564,19 @@ function cover_url($book)
                                             <input type="email" name="new_email" id="new_email" class="form-control form-control-sm" placeholder="مثل: ahmed@example.com">
                                             <div class="invalid-feedback">مطلوب وصيغته صحيحة.</div>
                                         </div>
-                                        <p class="small text-danger mt-1 mb-0">كلمة المرور الافتراضية ستكون ID المستخدم الجديد.</p>
+                                        <div class="mb-2">
+                                            <label for="phone" class="form-label small">رقم الهاتف</label>
+                                            <input type="text" name="phone" id="phone" class="form-control form-control-sm" placeholder="مثال: 0612345678">
+                                            <!-- <div class="invalid-feedback">مطلوب.</div> -->
+                                        </div>
+
+                                        <div class="mb-2">
+                                            <label for="address" class="form-label small">العنوان</label>
+                                            <input type="text" name="address" id="address" class="form-control form-control-sm" placeholder="مثال: الدار البيضاء، المغرب">
+                                            <!-- <div class="invalid-feedback">مطلوب.</div> -->
+                                        </div>
+
+                                        <p class="small text-danger mt-1 mb-0">كلمة المرور الافتراضية ستكون "password" + رقم التعريف الخاص بك.</p>
                                         <button type="button" id="cancelNewAdherentBtn" class="btn btn-sm btn-outline-secondary mt-2">إلغاء الإضافة</button>
                                     </div>
                                 <?php endif; ?>
@@ -600,7 +616,7 @@ function cover_url($book)
                             <hr>
                             <div class="row g-3 details-list">
                                 <div class="col-md-6"><small class="text-secondary">المعرّف المخصص:</small><br><strong id="details_custom_id"></strong></div>
-                                <div class="col-md-6"><small class="text-secondary">رقم قاعدة البيانات (ID):</small><br><strong id="details_id"></strong></div>
+                                <!-- <div class="col-md-6"><small class="text-secondary">رقم قاعدة البيانات (ID):</small><br><strong id="details_id"></strong></div> -->
                                 <div class="col-md-6"><small class="text-secondary">الصنف:</small><br><strong id="details_category"></strong></div>
                                 <div class="col-md-6"><small class="text-secondary">النوع:</small><br><strong id="details_type"></strong></div>
                                 <div class="col-12"><small class="text-secondary">الحالة:</small><br><span id="details_status" class="badge"></span></div>
@@ -636,7 +652,7 @@ function cover_url($book)
         const detailsCover = document.getElementById('details_cover');
         const detailsTitle = document.getElementById('details_title');
         const detailsAuthor = document.getElementById('details_author');
-        const detailsId = document.getElementById('details_id');
+        // const detailsId = document.getElementById('details_id');
         const detailsCategory = document.getElementById('details_category');
         const detailsType = document.getElementById('details_type');
         const detailsCustomId = document.getElementById('details_custom_id');
@@ -651,7 +667,7 @@ function cover_url($book)
                     detailsCover.src = book.cover;
                     detailsTitle.textContent = book.title;
                     detailsAuthor.textContent = book.author || 'غير محدد';
-                    detailsId.textContent = book.id;
+                    // detailsId.textContent = book.id;
                     detailsCategory.textContent = book.category || '—';
                     detailsType.textContent = book.type || '—';
                     detailsCustomId.textContent = book.custom_id || book.id;
