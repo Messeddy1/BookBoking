@@ -329,27 +329,46 @@ function cover_url($book)
             background-position: center;
             border-radius: .4rem;
         }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-decoration: none;
+        }
+
+        .nav-logo i {
+            margin-left: 10px;
+            color: #3498db;
+        }
     </style>
 </head>
 
 <body>
     <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top">
         <div class="container-fluid">
-            <a class="navbar-brand" href="/"><i class="fas fa-book-open text-primary"></i> مكتبتي</a>
-            <div class="d-flex gap-2 align-items-center">
+            <a class="navbar-brand" href="/">
+                <div class="nav-logo">
+                    <i class="fas fa-book-open"></i>
+                    <span>نادي القراءة</span>
+                </div>
+            </a>
+
+            <div class="d-flex flex-wrap gap-2 align-items-center">
                 <?php if ($user_id) { ?>
 
                     <div class="d-flex align-items-center">
                         <span class="navbar-text">مرحبا, <strong><?php echo htmlspecialchars($role); ?></strong></span>
                     </div>
 
-                    <div class="dropdown">
+                    <div class="d-flex gap-2">
                         <a href="/profile" class="btn btn-outline-secondary"><i class="fas fa-user"></i> الملف الشخصي</a>
                         <button class="btn btn-outline-danger" onclick="logout()"><i class="fas fa-sign-out-alt"></i> تسجيل الخروج</button>
                         <a href="/me-loans" class="btn btn-outline-secondary"><i class="fas fa-book"></i> إعارتي</a>
                     </div>
                     <?php if ($role === 'superadmin' || $role === 'gestionnaire'): ?>
-                        <div class="dropdown">
+                        <div class="d-flex">
                             <a href="/dashboard" class="btn btn-outline-secondary"><i class="fas fa-cog"></i> إدارة</a>
                         </div>
                     <?php endif; ?>
@@ -357,7 +376,7 @@ function cover_url($book)
                     <div class="d-flex align-items-center">
                         <span class="navbar-text">مرحبا, <strong>زائر</strong></span>
                     </div>
-                    <div class="dropdown">
+                    <div class="d-flex gap-2">
                         <a href="/login" class="btn btn-outline-primary"><i class="fas fa-sign-in-alt"></i> تسجيل الدخول</a>
                         <a href="/register" class="btn btn-outline-success"><i class="fas fa-user-plus"></i> إنشاء حساب</a>
                     </div>
@@ -369,7 +388,10 @@ function cover_url($book)
 
         <div class="d-flex align-items-center justify-content-between mb-3">
             <div>
-                <h3 class="mb-0">📚 مكتبتي</h3>
+                <div class="nav-logo">
+                    <i class="fas fa-book-open"></i>
+                    <span>نادي القراءة</span>
+                </div>
                 <small class="text-muted">تصفّح الكتب، ابحث، أو فلتر حسب الأصناف والحالة</small>
             </div>
         </div>
@@ -380,11 +402,12 @@ function cover_url($book)
 
         <form id="filtersForm" method="get" class="card p-3 mb-4 filter-row">
             <div class="row g-2 align-items-center">
+
                 <div class="col-12 col-md-4">
                     <input autocomplete="off" type="search" name="q" value="<?= htmlspecialchars($q) ?>" class="form-control" placeholder="ابحث عن عنوان، مؤلف أو رقم مخصص...">
                 </div>
 
-                <div class="col-auto">
+                <div class="col-12 col-md-auto">
                     <select name="category" id="categorySelect" class="form-select">
                         <option value="">كل الأصناف</option>
                         <?php foreach ($cats as $c): ?>
@@ -393,7 +416,7 @@ function cover_url($book)
                     </select>
                 </div>
 
-                <div class="col-auto">
+                <div class="col-12 col-md-auto">
                     <select name="type" id="typeSelect" class="form-select">
                         <option value="">كل الأنواع</option>
                         <?php foreach ($types as $t): ?>
@@ -402,7 +425,7 @@ function cover_url($book)
                     </select>
                 </div>
 
-                <div class="col-auto">
+                <div class="col-12 col-md-auto">
                     <select name="status" class="form-select">
                         <option value="">كل الحالات</option>
                         <option value="maear" <?= ($status === 'maear') ? 'selected' : '' ?>>معار</option>
@@ -410,8 +433,10 @@ function cover_url($book)
                     </select>
                 </div>
 
-                <div class="col-auto">
+                <div class="col-12 col-md-auto d-grid d-md-block">
                     <button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> بحث</button>
+                </div>
+                <div class="col-12 col-md-auto d-grid d-md-block">
                     <a href="?" class="btn btn-outline-secondary">مسح</a>
                 </div>
             </div>

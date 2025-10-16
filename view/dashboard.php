@@ -343,6 +343,19 @@ if (isset($_GET['action'])) {
             width: 100%;
             height: 250px;
         }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-decoration: none;
+        }
+
+        .nav-logo i {
+            margin-left: 10px;
+            color: #3498db;
+        }
     </style>
 </head>
 
@@ -350,7 +363,12 @@ if (isset($_GET['action'])) {
 
     <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top">
         <div class="container-fluid">
-            <a class="navbar-brand" href="/"><i class="fas fa-book-open text-primary"></i> مكتبتي</a>
+            <a class="navbar-brand" href="/">
+                <div class="nav-logo">
+                    <i class="fas fa-book-open"></i>
+                    <span>نادي القراءة</span>
+                </div>
+            </a>
             <div class="d-flex gap-2 align-items-center">
                 <?php if ($user_id) { ?>
 

@@ -9,8 +9,11 @@ $path = rtrim($path, '/');
 
 
 switch ($path) {
+    case '';
     case '/':
-    case '':
+        include "landingPage/landing.php";
+        break;
+    case '/home':
         include 'view/home.php';
         break;
     case '/dashboard':
